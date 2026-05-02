@@ -11,7 +11,7 @@ from sac_adr_main import SACWithFixedPrior, SACWithLaplacePrior
 
 
 # ===============================
-# 保存先
+# 保存先だお
 # ===============================
 SAVE_DIR = "./npz_logs"
 os.makedirs(SAVE_DIR, exist_ok=True)
