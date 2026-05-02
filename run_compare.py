@@ -5,15 +5,20 @@ import gymnasium as gym
 
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.callbacks import EvalCallback
+from stable_baselines3.common.monitor import Monitor
 
 from sac_adr_main import SACWithFixedPrior, SACWithLaplacePrior
 
+
+# ===============================
+# 保存先
+# ===============================
 SAVE_DIR = "./npz_logs"
 os.makedirs(SAVE_DIR, exist_ok=True)
 
 
 # ===============================
-# 共通評価コールバック
+# 評価コールバック
 # ===============================
 class UnifiedReturnCallback(EvalCallback):
     def __init__(self, *args, **kwargs):
@@ -30,12 +35,15 @@ class UnifiedReturnCallback(EvalCallback):
 
 
 # ===============================
-# 環境
+# 環境生成（重要：Monitor付き）
 # ===============================
 def make_envs(seed):
     train_env = make_vec_env("HalfCheetah-v5", n_envs=1, seed=seed)
-    eval_env = gym.make("HalfCheetah-v5")
+
+    # ★ここが重要修正
+    eval_env = Monitor(gym.make("HalfCheetah-v5"))
     eval_env.reset(seed=seed + 1000)
+
     return train_env, eval_env
 
 
@@ -81,7 +89,7 @@ def run_single(model_class, name, seed, total_timesteps):
 
 
 # ===============================
-# 5 seed実行
+# 5 seed 実行
 # ===============================
 def run_experiment(model_class, name, total_timesteps):
     all_returns = []
@@ -132,7 +140,7 @@ def plot_compare(t, m1, s1, m2, s2):
 # メイン
 # ===============================
 def main():
-    TOTAL_STEPS = 1_000_000   # ← 3_000_000にしてもOK
+    TOTAL_STEPS = 1_000_000   # ← 3_000_000に変えてOK
 
     print("===== Gaussian =====")
     t_g, m_g, s_g = run_experiment(
@@ -154,7 +162,7 @@ def main():
         m_l[:min_len], s_l[:min_len]
     )
 
-    print("Saved comparison graph!")
+    print("✅ comparison.png saved!")
 
 
 if __name__ == "__main__":
