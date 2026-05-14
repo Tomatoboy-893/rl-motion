@@ -87,7 +87,6 @@ def run_laplace(seed, total_timesteps, prior_std):
     model.learn(
         total_timesteps=total_timesteps,
         callback=callback,
-        progress_bar=True,
     )
 
     # model save
