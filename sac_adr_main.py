@@ -1,3 +1,4 @@
+# SAC カスタムモデル実装 (Gaussian / Laplace Prior)
 import math
 import torch
 import torch.nn as nn

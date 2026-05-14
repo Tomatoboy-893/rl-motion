@@ -1,3 +1,4 @@
+# 単一モデル実行用スクリプト
 import os
 import numpy as np
 import matplotlib.pyplot as plt

@@ -1,3 +1,4 @@
+# 比較実験実行用スクリプト
 import os
 import numpy as np
 import matplotlib.pyplot as plt
@@ -128,7 +129,7 @@ def plot_compare(t, m1, s1, m2, s2):
     plt.fill_between(t, m2 - s2, m2 + s2, alpha=0.2)
 
     plt.xlabel("Timesteps")
-    plt.ylabel("Return")
+    plt.ylabel("Mean Episodic Return")
     plt.legend()
     plt.grid()
 
