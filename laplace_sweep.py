@@ -5,7 +5,8 @@ import gymnasium as gym
 
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.callbacks import EvalCallback
-from sac_adr_main import SACWithFixedPrior
+from stable_baselines3.common.monitor import Monitor
+from sac_adr_main import SACWithFixedPrior, SACWithLaplacePrior
 
 # ===============================
 # OpenGL
@@ -50,7 +51,7 @@ def make_envs(seed):
         seed=seed
     )
 
-    eval_env = gym.make("HalfCheetah-v5")
+    eval_env = Monitor(gym.make("HalfCheetah-v5"))
     eval_env.reset(seed=seed + 1000)
 
     return train_env, eval_env
@@ -145,7 +146,10 @@ def main():
 
             all_returns.append(r)
 
-        all_returns = np.array(all_returns)
+        # 途中でエピソードが終了した場合などに備え、配列の長さを揃える
+        min_len = min(len(r) for r in all_returns)
+        all_returns = np.array([r[:min_len] for r in all_returns])
+        t = t[:min_len]
 
         mean = all_returns.mean(axis=0)
         std = all_returns.std(axis=0)
