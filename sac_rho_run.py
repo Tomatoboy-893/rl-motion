@@ -88,7 +88,7 @@ def main():
     plt.fill_between(t, mean-std, mean+std, alpha=0.3)
     plt.legend()
     plt.xlabel("Timesteps")
-    plt.ylabel("Return")
+    plt.ylabel("Mean Episodic Return")
     plt.grid()
     plt.savefig("learning_curve_laplace.png")
 
