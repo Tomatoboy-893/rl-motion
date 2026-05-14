@@ -70,21 +70,18 @@ def run_laplace(seed, total_timesteps, prior_std):
         render=False,
     )
 
-    model = SACWithFixedPrior(
-        "MlpPolicy",
-        train_env,
+    model = SACWithLaplacePrior(
+    "MlpPolicy",
+    train_env,
 
-        # KL regularization
-        beta_kl=0.01,
-        beta_lr=1e-3,
-        target_kl=1.0,
+    beta_kl=0.01,
+    beta_lr=1e-3,
+    target_kl=1.0,
 
-        # Laplace prior
-        prior_type="laplace",
-        prior_std=prior_std,
+    prior_std=prior_std,
 
-        verbose=1,
-    )
+    verbose=1,
+)
 
     model.learn(
         total_timesteps=total_timesteps,
