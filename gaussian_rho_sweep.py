@@ -83,9 +83,10 @@ def run_gaussian(seed, total_timesteps, rho):
         "MlpPolicy",
         train_env,
 
-        beta_kl=1.0,
-        beta_lr=1e-4,
-        target_kl=0.01,
+        # Laplace側と条件を揃える
+        beta_kl=0.01,
+        beta_lr=1e-3,
+        target_kl=1.0,
 
         prior_std=rho,
 
@@ -130,7 +131,7 @@ def main():
     TOTAL_STEPS = 1_000_000
 
     # Gaussian rho sweep
-    RHO_LIST = [0.1, 0.2, 0.5, 1.0]
+    rho_list = [0.1, 0.2, 0.5, 1.0]
 
     plt.figure(figsize=(7, 5))
 
