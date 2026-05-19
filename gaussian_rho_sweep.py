@@ -53,12 +53,12 @@ class UnifiedReturnCallback(EvalCallback):
 def make_envs(seed):
 
     train_env = make_vec_env(
-        "Humanoid-v4",
+        "HalfCheetah-v5",
         n_envs=1,
         seed=seed
     )
 
-    eval_env = Monitor(gym.make("Humanoid-v4"))
+    eval_env = Monitor(gym.make("HalfCheetah-v5"))
     eval_env.reset(seed=seed + 1000)
 
     return train_env, eval_env
@@ -89,7 +89,7 @@ def run_gaussian(seed, total_timesteps, rho):
 
         prior_std=rho,
 
-        verbose=1,
+        verbose=0,
         device="cuda",
         seed=seed,
     )
