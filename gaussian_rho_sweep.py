@@ -57,7 +57,7 @@ def run_gaussian(rho, seed):
         "MlpPolicy",
         env,
 
-        verbose=1,
+        verbose=0,
         seed=seed,
 
         beta_kl=1.0,
@@ -85,6 +85,7 @@ def run_gaussian(rho, seed):
     model.learn(
         total_timesteps=TOTAL_TIMESTEPS,
         callback=eval_callback,
+        log_interval=0,
     )
 
     timesteps = np.array(eval_callback.timesteps_log)
