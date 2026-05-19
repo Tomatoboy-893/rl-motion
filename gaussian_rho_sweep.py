@@ -4,26 +4,27 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 
-from sac_adr_main import SACWithFixedPrior
+import gymnasium as gym
+
 from stable_baselines3.common.callbacks import EvalCallback
 from stable_baselines3.common.monitor import Monitor
 
-import gymnasium as gym
+from sac_adr_main import SACWithFixedPrior
 
 
 SAVE_DIR = "./npz_logs"
 os.makedirs(SAVE_DIR, exist_ok=True)
 
-# sweep parameter
+# Gaussian rho sweep
 RHO_LIST = [0.05, 0.1, 0.2, 0.5]
 
-# seeds
+# random seeds
 SEEDS = [0, 1, 2, 3, 4]
 
 # training steps
 TOTAL_TIMESTEPS = 1_000_000
 
-# eval frequency
+# evaluation interval
 EVAL_FREQ = 5000
 
 
@@ -50,26 +51,33 @@ class RewardLoggerCallback(EvalCallback):
 def run_gaussian(rho, seed):
 
     env = Monitor(gym.make("Humanoid-v4"))
-
     eval_env = Monitor(gym.make("Humanoid-v4"))
 
     model = SACWithFixedPrior(
         "MlpPolicy",
         env,
+
         verbose=1,
         seed=seed,
 
-        prior_type="gaussian",
-        prior_rho=rho,
+        beta_kl=1.0,
+        beta_lr=1e-4,
+        target_kl=0.01,
+
+        prior_std=rho,
 
         device="cuda",
     )
 
     eval_callback = RewardLoggerCallback(
         eval_env,
+
         best_model_save_path=f"{SAVE_DIR}/gaussian_rho{rho}_seed{seed}_model",
+
         log_path=SAVE_DIR,
+
         eval_freq=EVAL_FREQ,
+
         deterministic=True,
         render=False,
     )
