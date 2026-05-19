@@ -57,7 +57,7 @@ def run_gaussian(rho, seed):
         "MlpPolicy",
         env,
 
-        verbose=0,
+        verbose=1,
         seed=seed,
 
         beta_kl=1.0,
