@@ -131,7 +131,7 @@ def main():
     TOTAL_STEPS = 1_000_000
 
     # Gaussian rho sweep
-    rho_list = [0.1, 0.2, 0.5, 1.0]
+    rho_list = [ 2.0, 5.0]
 
     plt.figure(figsize=(7, 5))
 
