@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 
 SAVE_DIR = "./npz_logs"
 
-params = [0.1, 0.5, 1.0]
+params = [0.1, 0.5, 1.0, 2.0, 5.0]
 
 plt.figure(figsize=(8, 6))
 
