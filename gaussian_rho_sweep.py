@@ -100,7 +100,9 @@ def run_gaussian(seed, total_timesteps, rho):
         callback=callback,
     )
 
+    # ======================================
     # model save
+    # ======================================
     model.save(
         f"{SAVE_DIR}/gaussian_rho{rho}_seed{seed}_model"
     )
@@ -111,16 +113,26 @@ def run_gaussian(seed, total_timesteps, rho):
     t = np.array(callback.timesteps)
     r = np.array(callback.episode_returns)
 
-    # seedごと保存
+    # ======================================
+    # return 保存
+    # ======================================
     np.savez(
         f"{SAVE_DIR}/gaussian_rho{rho}_seed{seed}.npz",
         timesteps=t,
         returns=r,
     )
 
+    # ======================================
+    # entropy 保存
+    # ======================================
+    np.savez(
+        f"{SAVE_DIR}/gaussian_rho{rho}_seed{seed}_entropy.npz",
+        entropy=np.array(model.pi_entropies)
+    )
+
     print(f"[Saved] gaussian_rho{rho}_seed{seed}.npz")
 
-    return t, r
+    return t, r, np.array(model.pi_entropies)
 
 
 # ===============================
@@ -130,8 +142,8 @@ def main():
 
     TOTAL_STEPS = 1_000_000
 
-    # Gaussian rho sweep
-    rho_list = [ 2.0, 5.0]
+    # best parameter のみ
+    rho_list = [1.0]
 
     plt.figure(figsize=(7, 5))
 
@@ -143,21 +155,25 @@ def main():
         print("====================================")
 
         all_returns = []
+        all_entropies = []
 
         # 5 seeds
         for seed in range(5):
 
             print(f"Seed {seed}")
 
-            t, r = run_gaussian(
+            t, r, entropy = run_gaussian(
                 seed=seed,
                 total_timesteps=TOTAL_STEPS,
                 rho=rho,
             )
 
             all_returns.append(r)
+            all_entropies.append(entropy)
 
-        # 長さ合わせ
+        # ======================================
+        # return 長さ合わせ
+        # ======================================
         min_len = min(len(r) for r in all_returns)
 
         all_returns = np.array([
@@ -169,7 +185,9 @@ def main():
         mean = all_returns.mean(axis=0)
         std = all_returns.std(axis=0)
 
-        # mean/std 保存
+        # ======================================
+        # return mean/std 保存
+        # ======================================
         np.savez(
             f"{SAVE_DIR}/gaussian_rho{rho}_mean_std.npz",
             timesteps=t,
@@ -180,7 +198,33 @@ def main():
 
         print(f"[Saved] gaussian_rho{rho}_mean_std.npz")
 
-        # plot
+        # ======================================
+        # entropy 長さ合わせ
+        # ======================================
+        e_min_len = min(len(e) for e in all_entropies)
+
+        all_entropies = np.array([
+            e[:e_min_len] for e in all_entropies
+        ])
+
+        entropy_mean = all_entropies.mean(axis=0)
+        entropy_std = all_entropies.std(axis=0)
+
+        # ======================================
+        # entropy mean/std 保存
+        # ======================================
+        np.savez(
+            f"{SAVE_DIR}/gaussian_entropy_mean_std.npz",
+            mean=entropy_mean,
+            std=entropy_std,
+            all_entropies=all_entropies,
+        )
+
+        print(f"[Saved] gaussian_entropy_mean_std.npz")
+
+        # ======================================
+        # return plot
+        # ======================================
         plt.plot(
             t,
             mean,
@@ -197,7 +241,7 @@ def main():
     plt.xlabel("Timesteps")
     plt.ylabel("Mean Episode Return")
 
-    plt.title("Gaussian Prior Parameter Sweep")
+    plt.title("Gaussian Prior")
 
     plt.grid(True)
     plt.legend()
