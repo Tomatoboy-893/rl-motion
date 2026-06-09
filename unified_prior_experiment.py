@@ -285,23 +285,24 @@ def run_sweep(
 # ===============================
 # main
 # ===============================
+
 def main():
 
     TOTAL_STEPS = 1_000_000
 
-    # Gaussian
     run_sweep(
-        prior_type="gaussian",
-        param_list=[1.0],
+        prior_type="laplace",
+        param_list=[
+            0.1,
+            0.5,
+            1.0,
+            2.0,
+        ],
         total_timesteps=TOTAL_STEPS,
     )
 
-    # Laplace
-    run_sweep(
-        prior_type="laplace",
-        param_list=[1.0],
-        total_timesteps=TOTAL_STEPS,
-    )
+if __name__ == "__main__":
+    main()
 
 if __name__ == "__main__":
     main()
