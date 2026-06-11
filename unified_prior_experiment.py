@@ -7,10 +7,7 @@ from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.callbacks import EvalCallback
 from stable_baselines3.common.monitor import Monitor
 
-from sac_adr_main import (
-    SACWithFixedPrior,
-    SACWithLaplacePrior
-)
+from sac_adr_main import SACWithLaplacePrior
 
 # ===============================
 # OpenGL
