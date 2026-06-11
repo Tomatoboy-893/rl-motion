@@ -1,3 +1,5 @@
+# sac_laplace_entropy_sweep.py
+
 import os
 import numpy as np
 import matplotlib.pyplot as plt
@@ -5,48 +7,37 @@ import gymnasium as gym
 
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.callbacks import EvalCallback
-from stable_baselines3.common.monitor import Monitor
-
 from sac_adr_main import SACWithLaplacePrior
 
+
 # ===============================
-# OpenGL
+# setup
 # ===============================
 os.environ["MUJOCO_GL"] = "egl"
 os.environ["PYOPENGL_PLATFORM"] = "egl"
 
-# ===============================
-# 保存先
-# ===============================
 SAVE_DIR = "./npz_logs"
 os.makedirs(SAVE_DIR, exist_ok=True)
+
 
 # ===============================
 # callback
 # ===============================
 class UnifiedReturnCallback(EvalCallback):
-
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-
         self.episode_returns = []
         self.timesteps = []
 
     def _on_step(self):
-
-        result = super()._on_step()
+        super()._on_step()
 
         if self.last_mean_reward is not None:
+            self.episode_returns.append(self.last_mean_reward)
+            self.timesteps.append(self.num_timesteps)
 
-            self.episode_returns.append(
-                self.last_mean_reward
-            )
+        return True
 
-            self.timesteps.append(
-                self.num_timesteps
-            )
-
-        return result
 
 # ===============================
 # env
@@ -59,23 +50,16 @@ def make_envs(seed):
         seed=seed
     )
 
-    eval_env = Monitor(
-        gym.make("HalfCheetah-v5")
-    )
-
+    eval_env = gym.make("HalfCheetah-v5")
     eval_env.reset(seed=seed + 1000)
 
     return train_env, eval_env
 
+
 # ===============================
-# main experiment
+# run single experiment
 # ===============================
-def run_experiment(
-    prior_type,
-    prior_param,
-    seed,
-    total_timesteps,
-):
+def run_experiment(scale, seed, total_timesteps):
 
     train_env, eval_env = make_envs(seed)
 
@@ -87,218 +71,121 @@ def run_experiment(
         render=False,
     )
 
-    # ===================================
-    # model
-    # ===================================
-    if prior_type == "gaussian":
+    model = SACWithLaplacePrior(
+        "MlpPolicy",
+        train_env,
+        beta_kl=0.01,
+        beta_lr=1e-3,
+        target_kl=1.0,
+        prior_std=scale,
+        verbose=0,
+        seed=seed,
+    )
 
-        model = SACWithFixedPrior(
-            "MlpPolicy",
-            train_env,
-
-            beta_kl=0.01,
-            beta_lr=1e-3,
-            target_kl=1.0,
-
-            prior_std=prior_param,
-
-            verbose=0,
-            device="cuda",
-            seed=seed,
-        )
-
-    elif prior_type == "laplace":
-
-        model = SACWithLaplacePrior(
-            "MlpPolicy",
-            train_env,
-
-            beta_kl=0.01,
-            beta_lr=1e-3,
-            target_kl=1.0,
-
-            prior_std=prior_param,
-
-            verbose=0,
-            device="cuda",
-            seed=seed,
-        )
-
-    else:
-        raise ValueError("invalid prior_type")
-
-    # ===================================
-    # learn
-    # ===================================
     model.learn(
         total_timesteps=total_timesteps,
         callback=callback,
+        progress_bar=True,
     )
 
-    # ===================================
-    # save
-    # ===================================
-    prefix = f"{prior_type}_{prior_param}"
-
-    model.save(
-        f"{SAVE_DIR}/{prefix}_seed{seed}_model"
-    )
-
-    returns = np.array(callback.episode_returns)
-
-    timesteps = np.array(callback.timesteps)
-
-    entropies = np.array(model.pi_entropies)
-
-    # return save
-    np.savez(
-        f"{SAVE_DIR}/{prefix}_seed{seed}.npz",
-        timesteps=timesteps,
-        returns=returns,
-    )
-
-    # entropy save
-    np.savez(
-        f"{SAVE_DIR}/{prefix}_seed{seed}_entropy.npz",
-        entropy=entropies,
-    )
-
-    print(f"[Saved] {prefix}_seed{seed}")
+    # entropy取得
+    ent = np.array(getattr(model, "pi_entropies", []))
 
     train_env.close()
     eval_env.close()
 
-    return timesteps, returns, entropies
+    return ent
+
 
 # ===============================
 # sweep
 # ===============================
-def run_sweep(
-    prior_type,
-    param_list,
-    total_timesteps,
-):
+def run_sweep(scales, total_timesteps=1_000_000, n_seeds=5):
 
-    plt.figure(figsize=(7,5))
+    all_means = []
+    all_stds = []
 
-    for param in param_list:
+    for scale in scales:
 
-        print()
-        print("================================")
-        print(f"{prior_type} param = {param}")
+        print("\n================================")
+        print(f"Laplace scale = {scale}")
         print("================================")
 
-        all_returns = []
-        all_entropies = []
+        entropies_all = []
 
-        for seed in range(5):
+        for seed in range(n_seeds):
 
-            t, r, e = run_experiment(
-                prior_type=prior_type,
-                prior_param=param,
-                seed=seed,
-                total_timesteps=total_timesteps,
-            )
+            ent = run_experiment(scale, seed, total_timesteps)
 
-            all_returns.append(r)
-            all_entropies.append(e)
+            if len(ent) > 0:
+                entropies_all.append(ent)
 
-        # ============================
-        # return mean/std
-        # ============================
-        min_len = min(len(x) for x in all_returns)
+        # 長さ揃え
+        min_len = min(len(x) for x in entropies_all)
+        entropies_all = np.array([x[:min_len] for x in entropies_all])
 
-        all_returns = np.array([
-            x[:min_len] for x in all_returns
-        ])
+        mean = entropies_all.mean(axis=0)
+        std = entropies_all.std(axis=0)
 
-        t = t[:min_len]
+        all_means.append(mean)
+        all_stds.append(std)
 
-        mean = all_returns.mean(axis=0)
-        std = all_returns.std(axis=0)
-
-        prefix = f"{prior_type}_{param}"
-
+        # 保存
         np.savez(
-            f"{SAVE_DIR}/{prefix}_mean_std.npz",
-            timesteps=t,
+            f"{SAVE_DIR}/laplace_{scale}_entropy.npz",
             mean=mean,
             std=std,
-            all_returns=all_returns,
+            all_entropies=entropies_all,
         )
 
-        # ============================
-        # entropy mean/std
-        # ============================
-        e_min = min(len(x) for x in all_entropies)
+    return scales, all_means, all_stds
 
-        all_entropies = np.array([
-            x[:e_min] for x in all_entropies
-        ])
 
-        entropy_mean = all_entropies.mean(axis=0)
-        entropy_std = all_entropies.std(axis=0)
+# ===============================
+# plot
+# ===============================
+def plot_entropy(scales, means, stds):
 
-        np.savez(
-            f"{SAVE_DIR}/{prefix}_entropy_mean_std.npz",
-            mean=entropy_mean,
-            std=entropy_std,
-            all_entropies=all_entropies,
-        )
+    plt.figure(figsize=(7, 5))
 
-        # ============================
-        # plot
-        # ============================
-        plt.plot(
-            t,
-            mean,
-            label=f"{prior_type}={param}"
-        )
+    for scale, mean, std in zip(scales, means, stds):
 
-        plt.fill_between(
-            t,
-            mean - std,
-            mean + std,
-            alpha=0.2,
-        )
+        x = np.arange(len(mean))
 
-    plt.xlabel("Timesteps")
-    plt.ylabel("Mean Return")
+        plt.plot(x, mean, label=f"scale={scale}")
+        plt.fill_between(x, mean - std, mean + std, alpha=0.2)
 
-    plt.title(f"{prior_type} parameter sweep")
-
+    plt.xlabel("Training steps (evaluation index)")
+    plt.ylabel("Policy entropy")
+    plt.title("Laplace prior: entropy comparison")
     plt.grid(True)
     plt.legend()
 
     plt.tight_layout()
 
     plt.savefig(
-        f"{SAVE_DIR}/{prior_type}_sweep.png",
+        f"{SAVE_DIR}/laplace_entropy_comparison.png",
         dpi=300
     )
 
     plt.close()
 
+
 # ===============================
 # main
 # ===============================
-
 def main():
 
-    TOTAL_STEPS = 1_000_000
+    scales = [0.1, 0.5, 1.0, 2.0]
 
-    run_sweep(
-        prior_type="laplace",
-        param_list=[
-            0.1,
-            0.5,
-            1.0,
-            2.0,
-        ],
-        total_timesteps=TOTAL_STEPS,
-    )
+    scales, means, stds = run_sweep(scales)
+
+    plot_entropy(scales, means, stds)
+
+    print("\n[DONE] saved:")
+    print(f"- {SAVE_DIR}/laplace_entropy_comparison.png")
+    print(f"- {SAVE_DIR}/laplace_*_entropy.npz")
+
 
 if __name__ == "__main__":
     main()
-
-
