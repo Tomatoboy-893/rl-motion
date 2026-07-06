@@ -26,8 +26,8 @@ class UnifiedReturnCallback(EvalCallback):
         return result
 
 def make_envs():
-    # seed=None でシードを固定しない（青柳先輩仕様）
-    train_env = make_vec_env("Humanoid-v5", n_envs=1, seed=None)
+    # 💡 n_envs=8 にして、8つの環境を同時にGPUに送り込みます
+    train_env = make_vec_env("Humanoid-v5", n_envs=8, seed=None)
     eval_env = gym.make("Humanoid-v5")
     eval_env.reset(seed=None)
     return train_env, eval_env
