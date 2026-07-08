@@ -2,77 +2,83 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 
-# 設定
-log_dir = "npz_logs_humanoid"
-scales = [0.1, 0.2, 0.5, 1.0, 2.0, 5.0]
-num_seeds = 5
-max_plot_points = 300  # 💡 データを300点に間引いて超軽量化する
+SAVE_DIR = "./npz_logs_humanoid"
+SCALES = [0.1, 0.2, 0.5, 1.0, 2.0, 5.0]
+NUM_RUNS = 5
 
-colors = plt.cm.plasma(np.linspace(0, 0.85, len(scales)))
-plt.figure(figsize=(9, 6))
+plt.figure(figsize=(8, 6))
 
-for idx, scale in enumerate(scales):
-    rewards_all = []
-    timesteps_all = []
-    
-    for seed in range(num_seeds):
-        reward_path = os.path.join(log_dir, f"gaussian_scale{scale}_run{seed}.npz")
-        if os.path.exists(reward_path):
-            with np.load(reward_path) as data:
-                rewards = data['returns']
-                timesteps = data['timesteps'] if 'timesteps' in data.files else np.arange(len(rewards)) * 20000
-                
-                if len(rewards.shape) > 1:
-                    rewards = rewards.mean(axis=1)
-                
-                # 横軸を0スタートに補正
-                if timesteps[0] > 0:
-                    timesteps = timesteps - timesteps[0]
-                    
-                rewards_all.append(rewards)
-                timesteps_all.append(timesteps)
-                
-    if not rewards_all:
+for scale in SCALES:
+    returns_all = []
+    timesteps = None
+
+    for run in range(NUM_RUNS):
+        path = f"{SAVE_DIR}/gaussian_scale{scale}_run{run}.npz"
+
+        if not os.path.exists(path):
+            print(f"Not found: {path}")
+            continue
+
+        data = np.load(path)
+        returns = data["returns"]
+        t = data["timesteps"]
+
+        returns_all.append(returns)
+
+        if timesteps is None:
+            timesteps = t
+
+    if len(returns_all) == 0:
+        print(f"No data for scale={scale}")
         continue
-        
-    # 全ランの長さを揃える
-    min_len = min(len(r) for r in rewards_all)
-    rewards_all = np.array([r[:min_len] for r in rewards_all])
-    X_steps = timesteps_all[0][:min_len]
-    
-    # 1. シード間の平均と標準偏差を計算
-    mean_r = np.nanmean(rewards_all, axis=0)
-    std_r = np.nanstd(rewards_all, axis=0) / np.sqrt(num_seeds)
-    
-    mean_r = np.nan_to_num(mean_r, nan=0.0)
-    std_r = np.nan_to_num(std_r, nan=0.0)
-    
-    # 💡 改善点：データを一気に間引く（これで計算量が1000分の一以下になります）
-    if min_len > max_plot_points:
-        indices = np.linspace(0, min_len - 1, max_plot_points, dtype=int)
-        X_steps = X_steps[indices]
-        mean_r = mean_r[indices]
-        std_r = std_r[indices]
 
-    # プロット（間引くだけで勝手に滑らかな綺麗な線になります！）
-    plt.plot(X_steps, mean_r, label=f"scale={scale}", color=colors[idx], linewidth=2)
-    plt.fill_between(X_steps, mean_r - std_r, mean_r + std_r, color=colors[idx], alpha=0.1)
+    # 長さを揃える
+    min_len = min(len(r) for r in returns_all)
+    returns_all = np.array([r[:min_len] for r in returns_all])
+    timesteps = timesteps[:min_len]
 
-plt.title("Humanoid-v5 Sweep Results (Comparison)", fontsize=14, fontweight='bold', pad=15)
-plt.xlabel("Timesteps (per run)", fontsize=12)
-plt.ylabel("Evaluation Mean Reward", fontsize=12)
-plt.grid(True, linestyle="--", alpha=0.5)
+    # 💡 累積してしまっている横軸を、各ラン単体の「0スタート」に綺麗に補正
+    if timesteps[0] > 0:
+        timesteps = timesteps - timesteps[0]
 
-# 横軸を 1.0M や 3.0M に綺麗に整形
+    # 💡 NaNを安全に除外して平均と標準偏差を計算
+    mean = np.nanmean(returns_all, axis=0)
+    std = np.nanstd(returns_all, axis=0)
+
+    # プロット
+    plt.plot(
+        timesteps,
+        mean,
+        linewidth=2,
+        label=f"scale={scale}"
+    )
+
+    plt.fill_between(
+        timesteps,
+        mean - std,
+        mean + std,
+        alpha=0.2
+    )
+
+plt.xlabel("Timesteps (per run)", fontsize=13)
+plt.ylabel("Mean Episode Return", fontsize=13)
+plt.title("Humanoid-v5 Gaussian Prior", fontsize=15)
+
+# X軸の表記を 1.0M, 2.0M のように見やすくフォーマット
 plt.gca().xaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{x/1e6:.1f}M' if x > 0 else '0'))
+plt.xlim(0, timesteps[-1])
 
-# 横軸の上限を実際のデータの最大値に自動追従させる
-if len(X_steps) > 0:
-    plt.xlim(0, X_steps[-1])
-
-plt.legend(loc="lower right", frameon=True, facecolor='white', edgecolor='none')
+plt.grid(True)
+plt.legend()
 plt.tight_layout()
-plt.savefig("humanoid_rewards_fixed.png", dpi=300)
+
+plt.savefig(
+    f"{SAVE_DIR}/humanoid_gaussian_return.png",
+    dpi=300
+)
 plt.close()
 
-print("🎉 今度こそ一瞬で重ね合わせグラフを保存しました: humanoid_rewards_fixed.png")
+print("===================================")
+print("Saved:")
+print(f"{SAVE_DIR}/humanoid_gaussian_return.png")
+print("===================================")
