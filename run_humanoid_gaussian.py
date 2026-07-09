@@ -58,7 +58,7 @@ def main():
 
             callback = UnifiedReturnCallback(
                 eval_env=eval_env,
-                eval_freq=20000,
+                eval_freq=625,
                 n_eval_episodes=5,
                 deterministic=True,
             )
