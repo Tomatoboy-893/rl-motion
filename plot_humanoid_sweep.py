@@ -5,9 +5,14 @@ import matplotlib.pyplot as plt
 # 設定
 SAVE_DIR = "./npz_logs_humanoid"
 SCALES = [0.1, 0.2, 0.5, 1.0, 2.0, 5.0]
-
-# 論文でよく使われるスタイリッシュなカラーパレット
 COLORS = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b"]
+
+# 💡 移動平均のウィンドウサイズ（大きくするほど線がツルツルになります。15〜20が最適）
+WINDOW_SIZE = 15
+
+def moving_average(data, window_size):
+    """データの移動平均を計算する関数（端の処理も綺麗に行います）"""
+    return np.convolve(data, np.ones(window_size)/window_size, mode='same')
 
 plt.figure(figsize=(9, 6))
 
@@ -20,7 +25,6 @@ for idx, scale in enumerate(SCALES):
     for seed in range(5):
         npz_path = f"{SAVE_DIR}/gaussian_scale{scale}_run{seed}.npz"
         if not os.path.exists(npz_path):
-            print(f"Warning: Missing {npz_path}")
             continue
             
         data = np.load(npz_path)
@@ -35,38 +39,41 @@ for idx, scale in enumerate(SCALES):
     if len(all_returns) == 0:
         continue
 
-    # 長さを揃えて行列化
     all_returns = np.array([r[:min_len] for r in all_returns])
     t_fixed = t_fixed[:min_len]
 
-    # 平均と標準偏差を計算
-    mean = all_returns.mean(axis=0)
-    std = all_returns.std(axis=0)
+    # 平均と標準偏差の生データ
+    raw_mean = all_returns.mean(axis=0)
+    raw_std = all_returns.std(axis=0)
 
-    # 💡 600点の高密度データなので、そのままplotするだけでツルツルになります！
+    # 💡 ここで移動平均を適用して、激しいギザギザ（ノイズ）だけを綺麗に溶かします！
+    smooth_mean = moving_average(raw_mean, WINDOW_SIZE)
+    smooth_std = moving_average(raw_std, WINDOW_SIZE)
+
+    # グラフの端っこ（ウィンドウの半分）は移動平均の計算上歪みやすいので、綺麗な部分だけをプロット
+    trim = WINDOW_SIZE // 2
+    
     plt.plot(
-        t_fixed,
-        mean,
-        linewidth=2.0,
+        t_fixed[trim:-trim],
+        smooth_mean[trim:-trim],
+        linewidth=2.2,
         color=COLORS[idx],
         label=f"Scale = {scale}"
     )
     
-    # 標準偏差のシャドウ（半透明）
     plt.fill_between(
-        t_fixed,
-        mean - std,
-        mean + std,
+        t_fixed[trim:-trim],
+        smooth_mean[trim:-trim] - smooth_std[trim:-trim],
+        smooth_mean[trim:-trim] + smooth_std[trim:-trim],
         color=COLORS[idx],
-        alpha=0.12
+        alpha=0.10  # シャドウを少し薄くして重ね合わせを見やすく
     )
 
 # グラフの装飾
 plt.xlabel("Timesteps", fontsize=12, fontweight="bold", labelpad=8)
 plt.ylabel("Mean Episode Return", fontsize=12, fontweight="bold", labelpad=8)
-plt.title("Humanoid-v5 SAC with Gaussian Prior (5,000 Step Freq)", fontsize=14, fontweight="bold", pad=15)
+plt.title("Humanoid-v5 SAC with Gaussian Prior (Smoothed Trends)", fontsize=14, fontweight="bold", pad=15)
 
-# 横軸を「1.0M, 2.0M, 3.0M」のように100万単位の見やすい表記にする
 plt.gca().xaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{x/1e6:.1f}M' if x > 0 else '0'))
 plt.xlim(0, 3_000_000)
 
@@ -74,12 +81,10 @@ plt.grid(True, linestyle="--", alpha=0.5)
 plt.legend(loc="upper left", frameon=True, facecolor="white", edgecolor="none", fontsize=10)
 plt.tight_layout()
 
-# 画像として保存
 output_path = f"{SAVE_DIR}/humanoid_sweep_final.png"
 plt.savefig(output_path, dpi=300)
 plt.close()
 
 print("====================================================")
-print(f"🎉 6スケール分のツルツル統合グラフを生成しました！")
-print(f"保存先: {output_path}")
+print(f"🎉 ノイズを消し去ったツルツル統合グラフを再生成しました！")
 print("====================================================")
