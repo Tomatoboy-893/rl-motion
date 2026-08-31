@@ -1,72 +1,137 @@
+cat << 'EOF' > plot_results.py
 import os
-import glob
 import numpy as np
 import matplotlib.pyplot as plt
+from scipy.ndimage import gaussian_filter1d
 
-# データが保存されているディレクトリ
-LOG_DIR = "./npz_logs_humanoid"
-SAVE_FIG_PATH = "./humanoid_learning_curve.png"
+SAVE_DIR = "./npz_logs_humanoid"
+SCALES = [0.1, 0.2, 0.5, 1.0, 2.0, 5.0]
+NUM_RUNS = 5
 
-def load_and_process_runs(pattern):
-    """指定されたパターンのnpzファイルを全て読み込み、平均と標準偏差を計算する"""
-    files = sorted(glob.glob(os.path.join(LOG_DIR, pattern)))
-    if not files:
-        print(f"⚠️ 該当するファイルが見つかりません: {pattern}")
-        return None, None, None
+plt.figure(figsize=(9, 6))
+colors = plt.cm.tab10(np.linspace(0, 1, len(SCALES)))
 
-    returns_list = []
+# 1. ADR (各スケール) のプロット
+for idx, scale in enumerate(SCALES):
+    returns_all = []
     timesteps = None
 
-    for f in files:
-        data = np.load(f)
-        returns_list.append(data["returns"])
+    for run in range(NUM_RUNS):
+        # 明示的に returns 側の npz パスを指定（_entropy.npz を回避）
+        path = f"{SAVE_DIR}/gaussian_scale{scale}_run{run}.npz"
+
+        if not os.path.exists(path):
+            continue
+
+        data = np.load(path)
+        if "returns" not in data:
+            continue
+
+        returns = data["returns"]
+        t = data["timesteps"]
+
+        returns_all.append(returns)
+
         if timesteps is None:
-            timesteps = data["timesteps"]
+            timesteps = t
 
-    # (num_runs, num_evals) の2次元配列に変換
-    returns_array = np.array(returns_list)
+    if len(returns_all) == 0:
+        continue
+
+    min_len = min(len(r) for r in returns_all)
+    returns_all = np.array([r[:min_len] for r in returns_all])
+    timesteps = timesteps[:min_len]
+
+    if timesteps[0] > 0:
+        timesteps = timesteps - timesteps[0]
+
+    mean = np.nanmean(returns_all, axis=0)
+    std = np.nanstd(returns_all, axis=0)
+
+    smooth_sigma = 5.0 
+    mean_smoothed = gaussian_filter1d(mean, sigma=smooth_sigma)
+    std_smoothed = gaussian_filter1d(std, sigma=smooth_sigma)
+
+    plt.plot(
+        timesteps,
+        mean_smoothed,
+        linewidth=2,
+        color=colors[idx],
+        label=f"Gaussian rho={scale}"
+    )
+
+    plt.fill_between(
+        timesteps,
+        mean_smoothed - std_smoothed,
+        mean_smoothed + std_smoothed,
+        color=colors[idx],
+        alpha=0.15
+    )
+
+# 2. 標準SAC（ベースライン）のプロット
+baseline_returns = []
+baseline_timesteps = None
+
+for run in range(NUM_RUNS):
+    path = f"{SAVE_DIR}/sac_baseline_run{run}.npz"
+    if os.path.exists(path):
+        data = np.load(path)
+        if "returns" in data:
+            baseline_returns.append(data["returns"])
+            if baseline_timesteps is None:
+                baseline_timesteps = data["timesteps"]
+
+if len(baseline_returns) > 0:
+    min_len_b = min(len(r) for r in baseline_returns)
+    baseline_returns = np.array([r[:min_len_b] for r in baseline_returns])
     
-    mean_returns = np.mean(returns_array, axis=0)
-    std_returns = np.std(returns_array, axis=0)
+    if baseline_timesteps is not None:
+        baseline_timesteps = baseline_timesteps[:min_len_b]
+        if baseline_timesteps[0] > 0:
+            baseline_timesteps = baseline_timesteps - baseline_timesteps[0]
+    else:
+        baseline_timesteps = np.arange(min_len_b) * 5000
 
-    return timesteps, mean_returns, std_returns
+    b_mean = np.nanmean(baseline_returns, axis=0)
+    b_std = np.nanstd(baseline_returns, axis=0)
 
-def main():
-    plt.figure(figsize=(10, 6))
-    plt.rcParams["font.size"] = 12
+    b_mean_smooth = gaussian_filter1d(b_mean, sigma=smooth_sigma)
+    b_std_smooth = gaussian_filter1d(b_std, sigma=smooth_sigma)
 
-    # 1. 標準SAC（ベースライン）の描画
-    ts_base, mean_base, std_base = load_and_process_runs("sac_baseline_run*.npz")
-    if mean_base is not None:
-        plt.plot(ts_base, mean_base, label="Standard SAC Baseline", color="black", linewidth=2)
-        plt.fill_between(ts_base, mean_base - std_base, mean_base + std_base, color="black", alpha=0.15)
+    plt.plot(
+        baseline_timesteps,
+        b_mean_smooth,
+        linewidth=2.5,
+        color="black",
+        linestyle="--",
+        label="Standard SAC"
+    )
+    plt.fill_between(
+        baseline_timesteps,
+        b_mean_smooth - b_std_smooth,
+        b_mean_smooth + b_std_smooth,
+        color="black",
+        alpha=0.1
+    )
 
-    # 2. ADR（各スケール）データの描画（例: gaussian_scale0.5, 1.0 など）
-    # ディレクトリ内にある gaussian_scale*_run0.npz からスケール名を自動取得
-    adr_files = glob.glob(os.path.join(LOG_DIR, "gaussian_scale*_run0.npz"))
-    scales = sorted(list(set([os.path.basename(f).split("_run")[0] for f in adr_files])))
+plt.xlabel("Timesteps", fontsize=13)
+plt.ylabel("Mean Episode Return", fontsize=13)
+plt.title("Humanoid-v5 Performance Comparison", fontsize=15)
 
-    colors = plt.cm.viridis(np.linspace(0.2, 0.8, max(len(scales), 1)))
+plt.gca().xaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{x/1e6:.1f}M' if x > 0 else '0'))
+if timesteps is not None:
+    plt.xlim(0, timesteps[-1])
 
-    for idx, scale_prefix in enumerate(scales):
-        pattern = f"{scale_prefix}_run*.npz"
-        ts, mean, std = load_and_process_runs(pattern)
-        if mean is not None:
-            label_name = scale_prefix.replace("gaussian_scale", "ADR Scale ")
-            plt.plot(ts, mean, label=label_name, color=colors[idx], linewidth=2)
-            plt.fill_between(ts, mean - std, mean + std, color=colors[idx], alpha=0.15)
+plt.grid(True, linestyle="--", alpha=0.7)
+plt.legend(loc="upper left")
+plt.tight_layout()
 
-    # グラフのレイアウト装飾
-    plt.title("Humanoid-v5 Learning Performance Comparison", fontsize=14, fontweight="bold")
-    plt.xlabel("Timesteps", fontsize=12)
-    plt.ylabel("Mean Episode Return", fontsize=12)
-    plt.grid(True, linestyle="--", alpha=0.6)
-    plt.legend(loc="lower right", frameon=True)
-    plt.tight_layout()
+output_file = f"{SAVE_DIR}/humanoid_gaussian_return.png"
+plt.savefig(output_file, dpi=300)
+plt.close()
 
-    # 画像保存
-    plt.savefig(SAVE_FIG_PATH, dpi=300)
-    print(f"🎉 グラフを保存しました: {SAVE_FIG_PATH}")
-
-if __name__ == "__main__":
-    main()
+print("===================================")
+print("🎉 グラフ生成が完了しました！")
+print(f"保存先: {output_file}")
+print("===================================")
+EOF
