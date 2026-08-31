@@ -4,22 +4,20 @@ import matplotlib.pyplot as plt
 from scipy.ndimage import gaussian_filter1d
 
 SAVE_DIR = "./npz_logs_humanoid"
-SCALES = [0.1, 0.2, 0.5, 1.0, 2.0, 5.0]
+# ファイル名と一致する文字列で指定
+SCALE_STRS = ["0.1", "0.2", "0.5", "1.0", "2.0", "5.0"]
 NUM_RUNS = 5
 SMOOTH_SIGMA = 5.0
 
 plt.figure(figsize=(10, 6), dpi=300)
-colors = plt.cm.tab10(np.linspace(0, 1, len(SCALES)))
+colors = plt.cm.tab10(np.linspace(0, 1, len(SCALE_STRS)))
 
-def plot_mean_std(label, color, linestyle="-", is_baseline=False):
+def load_entropy_data(file_prefix):
     entropy_all = []
     timesteps = None
 
     for run in range(NUM_RUNS):
-        if is_baseline:
-            path = f"{SAVE_DIR}/sac_baseline_run{run}_entropy.npz"
-        else:
-            path = f"{SAVE_DIR}/gaussian_scale{color}_run{run}_entropy.npz" if isinstance(color, (int, float)) else f"{SAVE_DIR}/gaussian_scale{label.split('=')[-1]}_run{run}_entropy.npz"
+        path = f"{SAVE_DIR}/{file_prefix}_run{run}_entropy.npz"
 
         if not os.path.exists(path):
             continue
@@ -34,8 +32,7 @@ def plot_mean_std(label, color, linestyle="-", is_baseline=False):
             timesteps = data[t_key]
 
     if len(entropy_all) == 0:
-        print(f"⚠️ データが見つかりませんでした: {label}")
-        return
+        return None, None
 
     min_len = min(len(e) for e in entropy_all)
     entropy_all = np.array([e[:min_len] for e in entropy_all])
@@ -53,31 +50,56 @@ def plot_mean_std(label, color, linestyle="-", is_baseline=False):
     mean_smooth = gaussian_filter1d(mean, sigma=SMOOTH_SIGMA)
     std_smooth = gaussian_filter1d(std, sigma=SMOOTH_SIGMA)
 
-    plot_color = "black" if is_baseline else color
+    return timesteps, (mean_smooth, std_smooth)
 
+# 1. ADR (各スケール) のプロット
+for idx, scale_str in enumerate(SCALE_STRS):
+    prefix = f"gaussian_scale{scale_str}"
+    timesteps, data = load_entropy_data(prefix)
+    
+    if timesteps is None:
+        print(f"⚠️ データが見つかりませんでした: ADR (rho={scale_str})")
+        continue
+        
+    mean_smooth, std_smooth = data
     plt.plot(
         timesteps,
         mean_smooth,
-        linewidth=2.5 if is_baseline else 2,
-        color=plot_color,
-        linestyle=linestyle,
-        label=label,
-        zorder=10 if is_baseline else 3
+        linewidth=2,
+        color=colors[idx],
+        linestyle="-",
+        label=f"ADR (rho={scale_str})"
     )
     plt.fill_between(
         timesteps,
         mean_smooth - std_smooth,
         mean_smooth + std_smooth,
-        color=plot_color,
-        alpha=0.15 if is_baseline else 0.1
+        color=colors[idx],
+        alpha=0.1
     )
 
-# 1. ADR (各スケール) のプロット
-for idx, scale in enumerate(SCALES):
-    plot_mean_std(label=f"ADR (rho={scale})", color=colors[idx], linestyle="-", is_baseline=False)
-
 # 2. 標準SAC (ベースライン) のプロット
-plot_mean_std(label="Standard SAC (Baseline)", color="black", linestyle="--", is_baseline=True)
+timesteps_base, data_base = load_entropy_data("sac_baseline")
+if timesteps_base is not None:
+    mean_base, std_base = data_base
+    plt.plot(
+        timesteps_base,
+        mean_base,
+        linewidth=2.5,
+        color="black",
+        linestyle="--",
+        label="Standard SAC (Baseline)",
+        zorder=10
+    )
+    plt.fill_between(
+        timesteps_base,
+        mean_base - std_base,
+        mean_base + std_base,
+        color="black",
+        alpha=0.15
+    )
+else:
+    print("⚠️ ベースラインデータが見つかりませんでした。")
 
 plt.xlabel("Timesteps", fontsize=13)
 plt.ylabel("Policy Entropy", fontsize=13)
