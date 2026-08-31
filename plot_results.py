@@ -1,95 +1,72 @@
 import os
+import glob
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.ndimage import gaussian_filter1d  # 💡 線を滑らかにする最強の関数
 
-SAVE_DIR = "./npz_logs_humanoid"
-SCALES = [0.1, 0.2, 0.5, 1.0, 2.0, 5.0]
-NUM_RUNS = 5
+# データが保存されているディレクトリ
+LOG_DIR = "./npz_logs_humanoid"
+SAVE_FIG_PATH = "./humanoid_learning_curve.png"
 
-plt.figure(figsize=(9, 6))
+def load_and_process_runs(pattern):
+    """指定されたパターンのnpzファイルを全て読み込み、平均と標準偏差を計算する"""
+    files = sorted(glob.glob(os.path.join(LOG_DIR, pattern)))
+    if not files:
+        print(f"⚠️ 該当するファイルが見つかりません: {pattern}")
+        return None, None, None
 
-# 💡 参考グラフに近い、見やすくて綺麗なカラーマップを設定
-colors = plt.cm.tab10(np.linspace(0, 1, len(SCALES)))
-
-for idx, scale in enumerate(SCALES):
-    returns_all = []
+    returns_list = []
     timesteps = None
 
-    for run in range(NUM_RUNS):
-        path = f"{SAVE_DIR}/gaussian_scale{scale}_run{run}.npz"
-
-        if not os.path.exists(path):
-            continue
-
-        data = np.load(path)
-        returns = data["returns"]
-        t = data["timesteps"]
-
-        returns_all.append(returns)
-
+    for f in files:
+        data = np.load(f)
+        returns_list.append(data["returns"])
         if timesteps is None:
-            timesteps = t
+            timesteps = data["timesteps"]
 
-    if len(returns_all) == 0:
-        print(f"No data for scale={scale}")
-        continue
+    # (num_runs, num_evals) の2次元配列に変換
+    returns_array = np.array(returns_list)
+    
+    mean_returns = np.mean(returns_array, axis=0)
+    std_returns = np.std(returns_array, axis=0)
 
-    # 長さを揃える
-    min_len = min(len(r) for r in returns_all)
-    returns_all = np.array([r[:min_len] for r in returns_all])
-    timesteps = timesteps[:min_len]
+    return timesteps, mean_returns, std_returns
 
-    # 横軸の0スタート補正
-    if timesteps[0] > 0:
-        timesteps = timesteps - timesteps[0]
+def main():
+    plt.figure(figsize=(10, 6))
+    plt.rcParams["font.size"] = 12
 
-    # 平均と標準偏差を計算
-    mean = np.nanmean(returns_all, axis=0)
-    std = np.nanstd(returns_all, axis=0)
+    # 1. 標準SAC（ベースライン）の描画
+    ts_base, mean_base, std_base = load_and_process_runs("sac_baseline_run*.npz")
+    if mean_base is not None:
+        plt.plot(ts_base, mean_base, label="Standard SAC Baseline", color="black", linewidth=2)
+        plt.fill_between(ts_base, mean_base - std_base, mean_base + std_base, color="black", alpha=0.15)
 
-    # 💡 階段状のガタガタを綺麗に消し去り、参考グラフのように滑らかにする処理
-    # sigmaの値（3〜7程度）を大きくするほど、よりツルツルの滑らかな線になります
-    smooth_sigma = 5.0 
-    mean_smoothed = gaussian_filter1d(mean, sigma=smooth_sigma)
-    std_smoothed = gaussian_filter1d(std, sigma=smooth_sigma)
+    # 2. ADR（各スケール）データの描画（例: gaussian_scale0.5, 1.0 など）
+    # ディレクトリ内にある gaussian_scale*_run0.npz からスケール名を自動取得
+    adr_files = glob.glob(os.path.join(LOG_DIR, "gaussian_scale*_run0.npz"))
+    scales = sorted(list(set([os.path.basename(f).split("_run")[0] for f in adr_files])))
 
-    # 💡 グラフのプロット（カクカクを排除し、滑らかな線のみを描画）
-    plt.plot(
-        timesteps,
-        mean_smoothed,
-        linewidth=2,
-        color=colors[idx],
-        label=f"Gaussian rho={scale}"  # 参考グラフの表記に合わせました
-    )
+    colors = plt.cm.viridis(np.linspace(0.2, 0.8, max(len(scales), 1)))
 
-    plt.fill_between(
-        timesteps,
-        mean_smoothed - std_smoothed,
-        mean_smoothed + std_smoothed,
-        color=colors[idx],
-        alpha=0.15  # シャドウの濃さを参考グラフ風に調整
-    )
+    for idx, scale_prefix in enumerate(scales):
+        pattern = f"{scale_prefix}_run*.npz"
+        ts, mean, std = load_and_process_runs(pattern)
+        if mean is not None:
+            label_name = scale_prefix.replace("gaussian_scale", "ADR Scale ")
+            plt.plot(ts, mean, label=label_name, color=colors[idx], linewidth=2)
+            plt.fill_between(ts, mean - std, mean + std, color=colors[idx], alpha=0.15)
 
-plt.xlabel("Timesteps", fontsize=13)
-plt.ylabel("Mean Episode Return", fontsize=13)
-plt.title("Gaussian Prior Parameter Sweep", fontsize=15)  # タイトルも統一
+    # グラフのレイアウト装飾
+    plt.title("Humanoid-v5 Learning Performance Comparison", fontsize=14, fontweight="bold")
+    plt.xlabel("Timesteps", fontsize=12)
+    plt.ylabel("Mean Episode Return", fontsize=12)
+    plt.grid(True, linestyle="--", alpha=0.6)
+    plt.legend(loc="lower right", frameon=True)
+    plt.tight_layout()
 
-# X軸の表記を 1.0M, 2.0M のように見やすくフォーマット
-plt.gca().xaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{x/1e6:.1f}M' if x > 0 else '0'))
-plt.xlim(0, timesteps[-1])
+    # 画像保存
+    plt.savefig(SAVE_FIG_PATH, dpi=300)
+    print(f"🎉 グラフを保存しました: {SAVE_FIG_PATH}")
 
-plt.grid(True, linestyle="--", alpha=0.7)
-plt.legend(loc="upper left")
-plt.tight_layout()
-
-plt.savefig(
-    f"{SAVE_DIR}/humanoid_gaussian_return.png",
-    dpi=300
-)
-plt.close()
-
-print("===================================")
-print("🎉 参考グラフと同じ滑らかさで保存しました！")
-print(f"{SAVE_DIR}/humanoid_gaussian_return.png")
-print("===================================")
+if __name__ == "__main__":
+    main()
