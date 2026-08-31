@@ -1,4 +1,3 @@
-cat << 'EOF' > plot_results.py
 import os
 import numpy as np
 import matplotlib.pyplot as plt
