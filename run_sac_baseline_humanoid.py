@@ -1,6 +1,7 @@
 import os
 import time
 import numpy as np
+import torch
 import gymnasium as gym
 
 from stable_baselines3 import SAC
@@ -15,12 +16,29 @@ class UnifiedReturnCallback(EvalCallback):
         super().__init__(*args, **kwargs)
         self.episode_returns = []
         self.timesteps = []
+        self.entropies = []  # エントロピー保持用リスト追加
 
     def _on_step(self) -> bool:
         result = super()._on_step()
-        if self.last_mean_reward is not None:
-            self.episode_returns.append(self.last_mean_reward)
-            self.timesteps.append(self.num_timesteps)
+        
+        # EvalCallbackによって評価が行われたタイミングを判定
+        if self.eval_freq > 0 and self.n_calls % self.eval_freq == 0:
+            if self.last_mean_reward is not None:
+                self.episode_returns.append(self.last_mean_reward)
+                self.timesteps.append(self.num_timesteps)
+
+                # --- ポリシーのエントロピー取得処理 ---
+                with torch.no_grad():
+                    # リプレイバッファからミニバッチ(256)をサンプルして観測を取得
+                    replay_data = self.model.replay_buffer.sample(256)
+                    obs_tensor = self.model.actor.obs_to_tensor(replay_data.observations)[0]
+                    
+                    # 現在のアクターからアクション分布パラメータを取得し、平均エントロピーを算出
+                    dist_params = self.model.actor.get_action_dist_params(obs_tensor)
+                    entropy = self.model.actor.action_dist.entropy(dist_params).mean().item()
+
+                self.entropies.append(entropy)
+
         return result
 
 def make_envs():
@@ -47,7 +65,7 @@ def main():
 
         callback = UnifiedReturnCallback(
             eval_env=eval_env,
-            eval_freq=625,  # ADRの実行コードと同一
+            eval_freq=625,  # n_envs=8 なので 625 * 8 = 5,000ステップごとに評価
             n_eval_episodes=5,
             deterministic=True,
         )
@@ -65,7 +83,6 @@ def main():
         # 学習開始
         model.learn(total_timesteps=TOTAL_STEPS, callback=callback)
 
-        # データ保存（ADR側と一致させた形式）
         prefix = "sac_baseline"
 
         # 1. 報酬データ保存
@@ -75,9 +92,16 @@ def main():
             timesteps=np.array(callback.timesteps),
         )
 
+        # 2. エントロピーデータ保存 (ADR側の保存形式と一致)
+        np.savez(
+            f"{SAVE_DIR}/{prefix}_run{i}_entropy.npz",
+            entropy=np.array(callback.entropies),
+            timesteps=np.array(callback.timesteps),
+        )
+
         train_env.close()
         eval_env.close()
-        print(f"Baseline Run {i+1} Done.")
+        print(f"Baseline Run {i+1} Done. Saved returns & entropy.")
 
     end_time = time.time()
     duration = (end_time - start_time) / 3600
