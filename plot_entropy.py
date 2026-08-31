@@ -4,17 +4,16 @@ import matplotlib.pyplot as plt
 from scipy.ndimage import gaussian_filter1d
 
 SAVE_DIR = "./npz_logs_humanoid"
-# ファイル名と一致する文字列で指定
 SCALE_STRS = ["0.1", "0.2", "0.5", "1.0", "2.0", "5.0"]
 NUM_RUNS = 5
 SMOOTH_SIGMA = 5.0
+TOTAL_STEPS = 3_000_000  # 300万ステップに固定
 
 plt.figure(figsize=(10, 6), dpi=300)
 colors = plt.cm.tab10(np.linspace(0, 1, len(SCALE_STRS)))
 
 def load_entropy_data(file_prefix):
     entropy_all = []
-    timesteps = None
 
     for run in range(NUM_RUNS):
         path = f"{SAVE_DIR}/{file_prefix}_run{run}_entropy.npz"
@@ -25,11 +24,7 @@ def load_entropy_data(file_prefix):
         data = np.load(path)
         keys = data.files
         e_key = next((k for k in ["entropy", "policy_entropy", "arr_0"] if k in keys), keys[0])
-        t_key = next((k for k in ["timesteps", "eval_timesteps", "arr_1"] if k in keys), keys[1] if len(keys) > 1 else None)
-
         entropy_all.append(data[e_key])
-        if timesteps is None and t_key is not None:
-            timesteps = data[t_key]
 
     if len(entropy_all) == 0:
         return None, None
@@ -37,12 +32,8 @@ def load_entropy_data(file_prefix):
     min_len = min(len(e) for e in entropy_all)
     entropy_all = np.array([e[:min_len] for e in entropy_all])
     
-    if timesteps is not None:
-        timesteps = timesteps[:min_len]
-        if timesteps[0] > 0:
-            timesteps = timesteps - timesteps[0]
-    else:
-        timesteps = np.arange(min_len) * 5000
+    # 横軸を 0 ~ 3,000,000 ステップに統一補正
+    timesteps = np.linspace(0, TOTAL_STEPS, min_len)
 
     mean = np.nanmean(entropy_all, axis=0)
     std = np.nanstd(entropy_all, axis=0)
@@ -116,6 +107,6 @@ plt.savefig(output_file, dpi=300)
 plt.close()
 
 print("===================================")
-print("🎉 比較グラフの出力が完了しました！")
+print("🎉 比較グラフの再出力が完了しました！")
 print(f"保存先: {output_file}")
 print("===================================")
