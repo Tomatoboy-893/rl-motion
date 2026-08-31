@@ -16,33 +16,32 @@ class UnifiedReturnCallback(EvalCallback):
         super().__init__(*args, **kwargs)
         self.episode_returns = []
         self.timesteps = []
-        self.entropies = []  # エントロピー保持用リスト追加
+        self.entropies = []
 
     def _on_step(self) -> bool:
         result = super()._on_step()
         
-        # EvalCallbackによって評価が行われたタイミングを判定
+        # 評価が行われるタイミング（n_envs=8でeval_freq=625の場合、5,000ステップごと）
         if self.eval_freq > 0 and self.n_calls % self.eval_freq == 0:
             if self.last_mean_reward is not None:
                 self.episode_returns.append(self.last_mean_reward)
                 self.timesteps.append(self.num_timesteps)
 
-                # --- ポリシーのエントロピー取得処理 ---
+                # --- エントロピー取得処理（CUDA Tensorに対応） ---
                 with torch.no_grad():
-                    # リプレイバッファからミニバッチ(256)をサンプルして観測を取得
                     replay_data = self.model.replay_buffer.sample(256)
-                    obs_tensor = self.model.actor.obs_to_tensor(replay_data.observations)[0]
+                    obs_tensor = replay_data.observations
                     
-                    # 現在のアクターからアクション分布パラメータを取得し、平均エントロピーを算出
-                    dist_params = self.model.actor.get_action_dist_params(obs_tensor)
-                    entropy = self.model.actor.action_dist.entropy(dist_params).mean().item()
+                    # アクション分布から log_prob を計算し、エントロピー (-log_prob) を求める
+                    mean_actions, log_std, kwargs = self.model.actor.get_action_dist_params(obs_tensor)
+                    _, log_prob = self.model.actor.action_dist.log_prob_from_params(mean_actions, log_std, **kwargs)
+                    entropy = (-log_prob).mean().item()
 
                 self.entropies.append(entropy)
 
         return result
 
 def make_envs():
-    # ADRコードと完全に同じ環境設定 (n_envs=8)
     train_env = make_vec_env("Humanoid-v5", n_envs=8, seed=None)
     eval_env = gym.make("Humanoid-v5")
     eval_env.reset(seed=None)
@@ -58,19 +57,17 @@ def main():
     print(f" Total Runs: {NUM_SEEDS} runs")
     print("=========================================")
 
-    # 5回ランのループ
     for i in range(NUM_SEEDS):
         print(f"\n--- Standard SAC Baseline Run {i+1}/{NUM_SEEDS} ---")
         train_env, eval_env = make_envs()
 
         callback = UnifiedReturnCallback(
             eval_env=eval_env,
-            eval_freq=625,  # n_envs=8 なので 625 * 8 = 5,000ステップごとに評価
+            eval_freq=625,  # 625 * 8envs = 5,000ステップごとに評価
             n_eval_episodes=5,
             deterministic=True,
         )
 
-        # 標準SAC（Stable-Baselines3 純正）のモデル構築
         model = SAC(
             "MlpPolicy",
             train_env,
@@ -92,7 +89,7 @@ def main():
             timesteps=np.array(callback.timesteps),
         )
 
-        # 2. エントロピーデータ保存 (ADR側の保存形式と一致)
+        # 2. エントロピーデータ保存
         np.savez(
             f"{SAVE_DIR}/{prefix}_run{i}_entropy.npz",
             entropy=np.array(callback.entropies),
