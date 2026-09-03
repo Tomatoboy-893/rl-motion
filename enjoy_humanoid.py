@@ -23,7 +23,7 @@ def main():
 
     # 1. 単一のGUI環境を作成
     try:
-        env = gym.make("Humanoid-v5", render_mode="human")
+        env = gym.make("Humanoid-v4", render_mode="human")
         print("✅ GUI環境の作成に成功しました")
     except Exception as e:
         print(f"❌ 環境の作成に失敗しました: {e}")
