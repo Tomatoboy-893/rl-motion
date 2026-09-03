@@ -1,4 +1,9 @@
 import os
+
+# --- ヘッドレス環境（サーバー）でのOpenGLエラーを防ぐための設定 ---
+os.environ["MUJOCO_GL"] = "osmesa"
+# -------------------------------------------------------------
+
 import gymnasium as gym
 from stable_baselines3.common.vec_env import DummyVecEnv
 from sac_adr_main import SACWithFixedPrior
@@ -20,14 +25,13 @@ def main():
         print(f"❌ モデルファイルが見つかりません: {MODEL_PATH}")
         return
 
-    # 1. render_mode="rgb_array" にしてビデオラッパーで保存する環境を作成 (v4を指定して次元数を一致させる)
+    # 1. 録画用環境の作成
     try:
         env = gym.make("Humanoid-v4", render_mode="rgb_array")
-        # 動画として保存するための RecordVideo ラッパーを適用
         env = gym.wrappers.RecordVideo(
             env, 
             video_folder=VIDEO_DIR, 
-            episode_trigger=lambda e: True, # すべてのエピソードを録画
+            episode_trigger=lambda e: True,
             name_prefix="humanoid_eval"
         )
         print("✅ 録画用環境の作成に成功しました")
@@ -48,7 +52,7 @@ def main():
         env.close()
         return
 
-    # 3. シミュレーションの実行（動画として保存される）
+    # 3. シミュレーションの実行（動画として保存）
     obs, _ = env.reset()
     total_reward = 0
     
