@@ -1,7 +1,16 @@
 import os
 import gymnasium as gym
 from stable_baselines3.common.vec_env import DummyVecEnv
+
+# sac_adr_main から SACWithFixedPrior をインポートしつつ、
+# __init__ をモンキーパッチ（上書き）して、ロード時に引数が足りなくてもエラーにならないようにする
 from sac_adr_main import SACWithFixedPrior
+
+_original_init = SACWithFixedPrior.__init__
+def _patched_init(self, *args, beta_kl=0.01, beta_lr=1e-3, target_kl=1.0, prior_std=0.05, **kwargs):
+    _original_init(self, *args, beta_kl=beta_kl, beta_lr=beta_lr, target_kl=target_kl, prior_std=prior_std, **kwargs)
+SACWithFixedPrior.__init__ = _patched_init
+
 
 MODEL_PATH = "./npz_logs/gaussian_rho0.05_seed0_model/best_model.zip"
 
@@ -20,9 +29,8 @@ def main():
         print(f"❌ 環境の作成に失敗しました: {e}")
         return
 
-    # 2. モデルのロード（次元数チェックを一時的に無視して強制ロードする安全策）
+    # 2. モデルのロード（次元数の不一致とカスタム引数の両方をクリア）
     try:
-        # custom_objects を用いて環境のチェックをバイパスしつつロード
         model = SACWithFixedPrior.load(
             MODEL_PATH, 
             env=env,
@@ -41,7 +49,6 @@ def main():
     print("\n👀 シミュレーションを開始します (ウィンドウを閉じると終了します)")
     try:
         for step in range(1000):
-            # 決定論的な行動を選択
             action, _ = model.predict(obs, deterministic=True)
             obs, reward, terminated, truncated, info = env.step(action)
             
