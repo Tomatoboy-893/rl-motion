@@ -1,19 +1,18 @@
 import os
 import numpy as np
-import pandas as pd
 
 SAVE_DIR = "./npz_logs_humanoid"
-SCALE_STRS = ["0.1", "0.2", "0.5", "1.0", "2.0", "5.0"]
+PREFIX = "sac_baseline"
 NUM_RUNS = 5
 
-def load_npz_data(prefix, key_type="return"):
-    """npzファイルからデータ配列を読み込む"""
+def load_data(key_type="return"):
     all_runs = []
     for run in range(NUM_RUNS):
-        filename = f"{prefix}_run{run}_entropy.npz" if key_type == "entropy" else f"{prefix}_run{run}.npz"
+        filename = f"{PREFIX}_run{run}_entropy.npz" if key_type == "entropy" else f"{PREFIX}_run{run}.npz"
         path = os.path.join(SAVE_DIR, filename)
         
         if not os.path.exists(path):
+            print(f"⚠️ ファイルが見つかりません: {path}")
             continue
             
         data = np.load(path)
@@ -32,52 +31,30 @@ def load_npz_data(prefix, key_type="return"):
     min_len = min(len(r) for r in all_runs)
     return np.array([r[:min_len] for r in all_runs])
 
-results = []
+returns = load_data("return")
+entropy = load_data("entropy")
 
-# 対象モデルのリスト作成 (標準SAC + ADR各スケール)
-models = [("Standard SAC", "sac_baseline")]
-for s in SCALE_STRS:
-    models.append((f"ADR (rho={s})", f"gaussian_scale{s}"))
-
-print("データ集計中...\n")
-
-for label, prefix in models:
-    returns_data = load_npz_data(prefix, key_type="return")
-    entropy_data = load_npz_data(prefix, key_type="entropy")
+if returns is not None and entropy is not None:
+    # 1. 最高リターン (全シード・全ステップ中の最大値)
+    max_return = np.max(returns)
     
-    if returns_data is None or entropy_data is None:
-        print(f"⚠️ スキップ（データ不備）: {label}")
-        continue
-        
-    # 1. 全ステップ・全シード中での「最高リターン (Max Return)」
-    max_return = np.max(returns_data)
+    # 2. 最終盤（ラスト10%ステップ）のインデックス
+    last_10_percent = int(returns.shape[1] * 0.9)
     
-    # 2. 学習最終盤（ラスト10%のステップ）における統計値
-    last_10_percent_idx = int(returns_data.shape[1] * 0.9)
+    # 最終盤の平均リターンと標準偏差
+    final_return_mean = np.mean(returns[:, last_10_percent:])
+    final_return_std = np.std(returns[:, last_10_percent:])
     
-    # 最終盤の平均リターン ± 標準偏差
-    final_return_mean = np.mean(returns_data[:, last_10_percent_idx:])
-    final_return_std = np.std(returns_data[:, last_10_percent_idx:])
+    # 最終盤の平均エントロピーと標準偏差
+    final_entropy_mean = np.mean(entropy[:, last_10_percent:])
+    final_entropy_std = np.std(entropy[:, last_10_percent:])
     
-    # 最終盤の平均エントロピー ± 標準偏差
-    final_entropy_mean = np.mean(entropy_data[:, last_10_percent_idx:])
-    final_entropy_std = np.std(entropy_data[:, last_10_percent_idx:])
-    
-    results.append({
-        "Model": label,
-        "Max Return": f"{max_return:.1f}",
-        "Final Return (Mean±Std)": f"{final_return_mean:.1f} ± {final_return_std:.1f}",
-        "Final Entropy (Mean±Std)": f"{final_entropy_mean:.2f} ± {final_entropy_std:.2f}"
-    })
-
-# DataFrame化してターミナル表示 & CSV保存
-df = pd.DataFrame(results)
-print("=" * 80)
-print("【Humanoid-v5 実験データ定量評価サマリー】")
-print("=" * 80)
-print(df.to_string(index=False))
-print("=" * 80)
-
-output_csv = os.path.join(SAVE_DIR, "humanoid_summary_metrics.csv")
-df.to_csv(output_csv, index=False)
-print(f"\n集計結果をCSVに保存しました: {output_csv}")
+    print("==========================================")
+    print("  Standard SAC (Baseline) 定量評価結果  ")
+    print("==========================================")
+    print(f"■ 最高リターン (Max Return): {max_return:.2f}")
+    print(f"■ 収束期平均リターン (Final Return): {final_return_mean:.2f} ± {final_return_std:.2f}")
+    print(f"■ 収束期平均エントロピー (Final Entropy): {final_entropy_mean:.2f} ± {final_entropy_std:.2f}")
+    print("==========================================")
+else:
+    print("❌ データの読み込みに失敗しました。")
