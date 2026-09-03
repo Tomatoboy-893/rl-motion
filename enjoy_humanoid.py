@@ -1,41 +1,39 @@
 import os
 import gymnasium as gym
-from stable_baselines3 import SAC
+
+# カスタムクラス（ADR版SAC）をインポート
+from sac_adr_main import SACWithFixedPrior
 
 # --- 設定セクション ---
 ENV_ID = "Humanoid-v5"
-
-MODEL_PATH = "./npz_logs/gaussian_rho0.05_seed0_model/best_model.zip"
-
-# 評価時の設定: 決定論的（確率的なノイズを入れない）な動きにするか、探索を含めるか
-# 通常、学習結果の純粋な性能を見る場合は True にします。
+# 可視化したいADRモデルのパス
+MODEL_PATH = "./npz_logs/gaussian_rho0.05_seed0_model/best_model.zip" 
 DETERMINISTIC_POLICY = True
 # ---------------------
 
-def enjoy_humanoid(model_path, env_id, deterministic=True):
-    print(f"\n=== Humanoid-v5 可視化を開始 ===")
-    print(f"モデル: {model_path}")
+def enjoy_adr_humanoid():
+    print(f"\n=== ADR Humanoid-v5 可視化を開始 ===")
+    print(f"モデル: {MODEL_PATH}")
     
-    if not os.path.exists(model_path):
-        print(f"❌ エラー: モデルファイルが見つかりません -> {model_path}")
+    if not os.path.exists(MODEL_PATH):
+        print(f"❌ エラー: モデルファイルが見つかりません -> {MODEL_PATH}")
         return
 
     # 1. 環境の作成 (render_mode="human" でGUIウィンドウを表示)
     try:
-        # Humanoid-v5 はレンダリングにMuJoCoを使用します
-        env = gym.make(env_id, render_mode="human")
+        env = gym.make(ENV_ID, render_mode="human")
         print("✅ 環境の作成に成功しました (GUIウィンドウが開きます)")
     except Exception as e:
-        print(f"❌ エラー: 環境の作成に失敗しました。MuJoCo環境が正しくインストールされているか確認してください。\n詳細: {e}")
+        print(f"❌ エラー: 環境の作成に失敗しました: {e}")
         return
 
-    # 2. 学習済みモデルのロード
+    # 2. カスタムクラスでモデルをロード
     try:
-        # 使用したアルゴリズムに合わせてクラスをロードしてください (今回は SAC)
-        model = SAC.load(model_path, env=env)
-        print(f"✅ モデルのロードに成功しました")
+        # SAC ではなく SACWithFixedPrior でロードする
+        model = SACWithFixedPrior.load(MODEL_PATH, env=env)
+        print(f"✅ ADRモデルのロードに成功しました！")
     except Exception as e:
-        print(f"❌ エラー: モデルのロードに失敗しました。ファイル形式やアルゴリズムが一致しているか確認してください。\n詳細: {e}")
+        print(f"❌ エラー: モデルのロードに失敗しました: {e}")
         env.close()
         return
 
@@ -44,22 +42,19 @@ def enjoy_humanoid(model_path, env_id, deterministic=True):
     total_reward = 0
     step_count = 0
     
-    print("\n👀 シュミレーションを開始します (ESCキーでウィンドウを閉じると中断します)")
+    print("\n👀 シミュレーションを開始します (ESCキーでウィンドウを閉じると中断します)")
     
     try:
-        # Humanoid-v5 は最大1000ステップで1エピソードが終了します
         for step in range(1000):
-            # モデルに基づいて行動を選択
-            # deterministic=True にすると、学習した確率分布の平均値（最も確実な行動）を選択します
-            action, _states = model.predict(obs, deterministic=deterministic)
+            # 行動選択
+            action, _states = model.predict(obs, deterministic=DETERMINISTIC_POLICY)
             
-            # 環境を1ステップ進める（内部で自動的にレンダリングが行われます）
+            # ステップを進める
             obs, reward, terminated, truncated, info = env.step(action)
             
             total_reward += reward
             step_count += 1
             
-            # エピソード終了条件 (転倒など)
             if terminated or truncated:
                 print(f"🏁 エピソード終了 (ステップ数: {step_count})")
                 break
@@ -69,12 +64,9 @@ def enjoy_humanoid(model_path, env_id, deterministic=True):
     except Exception as e:
         print(f"⚠️ 実行中にエラーが発生しました: {e}")
     
-    # 4. クリーンアップ
-    print(f"📊 トータル報酬: {total_reward:.2f}")
     env.close()
+    print(f"📊 トータル報酬: {total_reward:.2f}")
     print("=== 可視化を終了しました ===")
 
-# --- 実行 ---
 if __name__ == "__main__":
-    # MODEL_PATH 変数を実際のモデルファイルのパスに書き換えてから実行してください
-    enjoy_humanoid(MODEL_PATH, ENV_ID, deterministic=DETERMINISTIC_POLICY)
+    enjoy_adr_humanoid()
