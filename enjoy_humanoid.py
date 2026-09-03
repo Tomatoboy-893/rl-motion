@@ -14,7 +14,7 @@ def _patched_init(self, *args, beta_kl=0.01, beta_lr=1e-3, target_kl=1.0, prior_
     _original_init(self, *args, beta_kl=beta_kl, beta_lr=beta_lr, target_kl=target_kl, prior_std=prior_std, **kwargs)
 SACWithFixedPrior.__init__ = _patched_init
 
-MODEL_PATH = "./npz_logs/gaussian_rho0.05_seed0_model/best_model.zip"
+MODEL_PATH = "gaussian_scale0.1_run0_entropy.npz"
 VIDEO_DIR = "./videos"
 
 def main():
