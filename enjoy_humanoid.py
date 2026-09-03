@@ -5,9 +5,7 @@ from stable_baselines3 import SAC
 # --- 設定セクション ---
 ENV_ID = "Humanoid-v5"
 
-# 可視化したい学習済みモデルのパスを指定してください
-# 例: "./logs/best_model.zip" や "./saved_models/sac_humanoid_3M.zip"
-MODEL_PATH = "path/to/your/saved/model.zip" 
+MODEL_PATH = "./npz_logs/gaussian_rho0.05_seed0_model/best_model.zip"
 
 # 評価時の設定: 決定論的（確率的なノイズを入れない）な動きにするか、探索を含めるか
 # 通常、学習結果の純粋な性能を見る場合は True にします。
