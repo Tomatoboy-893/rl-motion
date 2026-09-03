@@ -1,6 +1,6 @@
 import os
 import gymnasium as gym
-from stable_bas3 import SAC # 今回はSACと仮定します
+from stable_baselines3 import SAC
 
 # --- 設定セクション ---
 ENV_ID = "Humanoid-v5"
