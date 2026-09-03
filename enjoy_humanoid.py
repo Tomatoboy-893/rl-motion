@@ -1,7 +1,7 @@
 import os
 
 # --- ヘッドレス環境（サーバー）でのOpenGLエラーを防ぐための設定 ---
-os.environ["MUJOCO_GL"] = "osmesa"
+os.environ["MUJOCO_GL"] = "egl"
 # -------------------------------------------------------------
 
 import gymnasium as gym
