@@ -26,17 +26,16 @@ class UnifiedReturnCallback(EvalCallback):
         return result
 
 def make_envs():
-    # 💡 n_envs=8 にして、8つの環境を同時にGPUに送り込みます
+    # 💡 n_envs=8 にして、8つの環境を同時に並列実行
     train_env = make_vec_env("Humanoid-v5", n_envs=8, seed=None)
     eval_env = gym.make("Humanoid-v5")
     eval_env.reset(seed=None)
     return train_env, eval_env
 
 def main():
-    # 💡 実行したいスケールの全リスト
     SCALES = [0.1, 0.2, 0.5, 1.0, 2.0, 5.0]
     TOTAL_STEPS = 3_000_000  # 各300万ステップ
-    NUM_SEEDS = 5            # 各5回実行
+    NUM_SEEDS = 5            # 各5回実行（seed0〜seed4）
 
     start_time = time.time()
     print("=========================================")
@@ -53,7 +52,7 @@ def main():
         
         # 5回ランのループ
         for i in range(NUM_SEEDS):
-            print(f"\n--- [scale={scale}] Run {i+1}/{NUM_SEEDS} ---")
+            print(f"\n--- [scale={scale}] Run {i+1}/{NUM_SEEDS} (Seed {i}) ---")
             train_env, eval_env = make_envs()
 
             callback = UnifiedReturnCallback(
@@ -63,7 +62,7 @@ def main():
                 deterministic=True,
             )
 
-            # モデルのインスタンス化（論文準拠パラメータ）
+            # モデルのインスタンス化
             model = SACWithFixedPrior(
                 "MlpPolicy",
                 train_env,
@@ -80,22 +79,27 @@ def main():
             # 学習開始
             model.learn(total_timesteps=TOTAL_STEPS, callback=callback)
 
-            # データ保存
-            prefix = f"gaussian_scale{scale}"
+            # 保存用プレフィックス（シード番号も含めると識別しやすくなります）
+            prefix = f"gaussian_scale{scale}_seed{i}"
             
-            # 1. 報酬データ保存
+            # 1. 報酬データ保存 (.npz)
             np.savez(
-                f"{SAVE_DIR}/{prefix}_run{i}.npz",
+                f"{SAVE_DIR}/{prefix}.npz",
                 returns=np.array(callback.episode_returns),
                 timesteps=np.array(callback.timesteps),
             )
             
-            # 2. エントロピーデータ保存
+            # 2. エントロピーデータ保存 (.npz)
             if hasattr(model, "pi_entropies"):
                 np.savez(
-                    f"{SAVE_DIR}/{prefix}_run{i}_entropy.npz",
+                    f"{SAVE_DIR}/{prefix}_entropy.npz",
                     entropy=np.array(model.pi_entropies),
                 )
+
+            # 3. 💡 【追加】モデルの重み（.zipファイル）を保存する処理
+            model_save_path = f"{SAVE_DIR}/{prefix}_model.zip"
+            model.save(model_save_path)
+            print(f"💾 モデルを保存しました: {model_save_path}")
 
             train_env.close()
             eval_env.close()
