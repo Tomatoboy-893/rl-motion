@@ -1,10 +1,11 @@
 import os
+
+# 💡 ヘッドレスサーバーでのレンダリング用設定
+os.environ["MUJOCO_GL"] = "egl"
+
 import gymnasium as gym
 from gymnasium.wrappers import RecordVideo
 from stable_baselines3 import SAC
-
-# 自作のカスタムモデルクラスをインポート
-from sac_adr_main import SACWithFixedPrior
 
 def main():
     model_path = "./npz_logs_humanoid/gaussian_scale0.1_seed0_model.zip"
@@ -29,10 +30,8 @@ def main():
         name_prefix="humanoid_walk"
     )
     
-    # 💡 1. まず通常の SAC.load でモデル構造と一緒にロードする
     model = SAC.load(model_path, env=env)
     
-    # 3エピソード分を動画化して実行
     num_episodes = 3
     print(f"🎥 動画の生成を開始します（計 {num_episodes} エピソード）...")
     
