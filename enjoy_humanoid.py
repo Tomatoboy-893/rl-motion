@@ -2,11 +2,10 @@ import os
 import gymnasium as gym
 from gymnasium.wrappers import RecordVideo
 
-# 💡 重要: カスタムクラスをインポートして読み込みます
+# 自作のカスタムモデルクラスをインポート
 from sac_adr_main import SACWithFixedPrior
 
 def main():
-    # 確認したいモデルのパスを指定
     model_path = "./npz_logs_humanoid/gaussian_scale0.1_seed0_model.zip"
     video_dir = "./videos_humanoid"
     
@@ -18,7 +17,7 @@ def main():
 
     print(f"🎬 モデルをロード中: {model_path}")
     
-    # Humanoid-v5 環境の作成 (rgb_arrayを指定して動画化に対応)
+    # Humanoid-v5 環境の作成
     env = gym.make("Humanoid-v5", render_mode="rgb_array")
     
     # 動画保存用ラッパーの適用
@@ -29,8 +28,15 @@ def main():
         name_prefix="humanoid_walk"
     )
     
-    # 💡 SACではなく、カスタムクラスの .load() を使用
-    model = SACWithFixedPrior.load(model_path, env=env)
+    # 💡 ロード時に学習時と同じハイパーパラメータをキーワード引数で指定する
+    model = SACWithFixedPrior.load(
+        model_path, 
+        env=env,
+        beta_kl=0.01,
+        beta_lr=1e-3,
+        target_kl=1.0,
+        prior_std=0.1  # ※ロードするモデルの scale に合わせて変更してください（例: scale=0.5 なら 0.5）
+    )
     
     # 3エピソード分を動画化して実行
     num_episodes = 3
