@@ -1,53 +1,56 @@
 import os
-import numpy as np
-import matplotlib.pyplot as plt
+import gymnasium as gym
+from gymnasium.wrappers import RecordVideo
 
-SAVE_DIR = "./npz_logs_humanoid"
-SCALES = [0.1, 0.2, 0.5, 1.0, 2.0, 5.0]
-NUM_SEEDS = 5
+# 💡 重要: カスタムクラスをインポートして読み込みます
+from sac_adr_main import SACWithFixedPrior
 
-plt.figure(figsize=(10, 6))
-
-for scale in SCALES:
-    returns_list = []
-    timesteps = None
+def main():
+    # 確認したいモデルのパスを指定
+    model_path = "./npz_logs_humanoid/gaussian_scale0.1_seed0_model.zip"
+    video_dir = "./videos_humanoid"
     
-    for i in range(NUM_SEEDS):
-        # 命名規則のゆれ（seed{i} または run{i}）の両方に対応
-        path_seed = os.path.join(SAVE_DIR, f"gaussian_scale{scale}_seed{i}.npz")
-        path_run = os.path.join(SAVE_DIR, f"gaussian_scale{scale}_run{i}.npz")
-        
-        path = path_seed if os.path.exists(path_seed) else (path_run if os.path.exists(path_run) else None)
-        
-        if path and os.path.exists(path):
-            data = np.load(path)
-            returns_list.append(data["returns"])
-            if timesteps is None:
-                timesteps = data["timesteps"]
-                
-    if returns_list:
-        # 複数シードの平均と標準偏差を計算
-        returns_array = np.array(returns_list)
-        mean_ret = np.mean(returns_array, axis=0)
-        std_ret = np.std(returns_array, axis=0)
-        
-        if timesteps is not None and len(timesteps) == len(mean_ret):
-            # グラフにプロット（平均線＋濃淡の分散範囲）
-            line, = plt.plot(timesteps, mean_ret, label=f"Scale {scale}")
-            plt.fill_between(
-                timesteps, 
-                mean_ret - std_ret, 
-                mean_ret + std_ret, 
-                color=line.get_color(), 
-                alpha=0.2
-            )
+    os.makedirs(video_dir, exist_ok=True)
+    
+    if not os.path.exists(model_path):
+        print(f"⚠️ エラー: 指定したモデルが見つかりません -> {model_path}")
+        return
 
-plt.xlabel("Timesteps", fontsize=12)
-plt.ylabel("Evaluation Mean Return", fontsize=12)
-plt.title("Humanoid-v5: Learning Curves Comparison by Scale", fontsize=14)
-plt.legend(fontsize=10)
-plt.grid(True, linestyle="--", alpha=0.6)
+    print(f"🎬 モデルをロード中: {model_path}")
+    
+    # Humanoid-v5 環境の作成 (rgb_arrayを指定して動画化に対応)
+    env = gym.make("Humanoid-v5", render_mode="rgb_array")
+    
+    # 動画保存用ラッパーの適用
+    env = RecordVideo(
+        env, 
+        video_folder=video_dir, 
+        episode_trigger=lambda x: True,
+        name_prefix="humanoid_walk"
+    )
+    
+    # 💡 SACではなく、カスタムクラスの .load() を使用
+    model = SACWithFixedPrior.load(model_path, env=env)
+    
+    # 3エピソード分を動画化して実行
+    num_episodes = 3
+    print(f"🎥 動画の生成を開始します（計 {num_episodes} エピソード）...")
+    
+    for ep in range(num_episodes):
+        obs, info = env.reset()
+        done = False
+        truncated = False
+        total_reward = 0.0
+        
+        while not (done or truncated):
+            action, _states = model.predict(obs, deterministic=True)
+            obs, reward, done, truncated, info = env.step(action)
+            total_reward += reward
+            
+        print(f"Episode {ep+1} 終了 | 報酬: {total_reward:.2f}")
+        
+    env.close()
+    print(f"🎉 動画の保存が完了しました！ 保存先フォルダ: {video_dir}/")
 
-output_path = "humanoid_learning_curves.png"
-plt.savefig(output_path, dpi=300, bbox_inches="tight")
-print(f"📈 学習曲線のグラフを保存しました: {output_path}")
+if __name__ == "__main__":
+    main()
