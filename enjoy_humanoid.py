@@ -1,6 +1,7 @@
 import os
 import gymnasium as gym
 from gymnasium.wrappers import RecordVideo
+from stable_baselines3 import SAC
 
 # 自作のカスタムモデルクラスをインポート
 from sac_adr_main import SACWithFixedPrior
@@ -28,15 +29,8 @@ def main():
         name_prefix="humanoid_walk"
     )
     
-    # 💡 ロード時に学習時と同じハイパーパラメータをキーワード引数で指定する
-    model = SACWithFixedPrior.load(
-        model_path, 
-        env=env,
-        beta_kl=0.01,
-        beta_lr=1e-3,
-        target_kl=1.0,
-        prior_std=0.1  # ※ロードするモデルの scale に合わせて変更してください（例: scale=0.5 なら 0.5）
-    )
+    # 💡 1. まず通常の SAC.load でモデル構造と一緒にロードする
+    model = SAC.load(model_path, env=env)
     
     # 3エピソード分を動画化して実行
     num_episodes = 3
