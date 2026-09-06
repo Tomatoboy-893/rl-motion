@@ -26,7 +26,7 @@ class UnifiedReturnCallback(EvalCallback):
         return result
 
 def make_envs():
-    # 💡 n_envs=8 にして、8つの環境を同時に並列実行
+    # n_envs=8 にして、8つの環境を同時に並列実行
     train_env = make_vec_env("Humanoid-v5", n_envs=8, seed=None)
     eval_env = gym.make("Humanoid-v5")
     eval_env.reset(seed=None)
@@ -79,7 +79,7 @@ def main():
             # 学習開始
             model.learn(total_timesteps=TOTAL_STEPS, callback=callback)
 
-            # 保存用プレフィックス（シード番号も含めると識別しやすくなります）
+            # 保存用プレフィックス
             prefix = f"gaussian_scale{scale}_seed{i}"
             
             # 1. 報酬データ保存 (.npz)
@@ -96,7 +96,7 @@ def main():
                     entropy=np.array(model.pi_entropies),
                 )
 
-            # 3. 💡 【追加】モデルの重み（.zipファイル）を保存する処理
+            # 3. 💡 モデルの重み（.zipファイル）を保存する処理
             model_save_path = f"{SAVE_DIR}/{prefix}_model.zip"
             model.save(model_save_path)
             print(f"💾 モデルを保存しました: {model_save_path}")
