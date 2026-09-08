@@ -20,7 +20,7 @@ def main():
     print(f"🎬 モデルをロード中: {model_path}")
     
     # Humanoid-v5 環境の作成
-    env = gym.make("Humanoid-v5", render_mode="rgb_array")
+    env = gym.make("Humanoid-v5", render_mode="rgb_array",max_episode_steps=3000)
     
     # 動画保存用ラッパーの適用
     env = RecordVideo(
