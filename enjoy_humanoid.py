@@ -8,7 +8,7 @@ from gymnasium.wrappers import RecordVideo
 from stable_baselines3 import SAC
 
 def main():
-    model_path = "./npz_logs_humanoid/gaussian_scale1.0_seed4_model.zip"
+    model_path = "./npz_logs_humanoid/gaussian_scale2.0_seed4_model.zip"
     video_dir = "./videos_humanoid"
     
     os.makedirs(video_dir, exist_ok=True)
