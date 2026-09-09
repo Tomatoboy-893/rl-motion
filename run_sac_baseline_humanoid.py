@@ -17,27 +17,36 @@ class UnifiedReturnCallback(EvalCallback):
         self.episode_returns = []
         self.timesteps = []
         self.entropies = []
+        self.actor_losses = []   # 追加: Actor Loss用
+        self.critic_losses = []  # 追加: Critic Loss用
 
     def _on_step(self) -> bool:
         result = super()._on_step()
         
-        # 評価が行われるタイミング（n_envs=8でeval_freq=625の場合、5,000ステップごと）
+        # 評価が行われるタイミング（eval_freqごと）
         if self.eval_freq > 0 and self.n_calls % self.eval_freq == 0:
             if self.last_mean_reward is not None:
                 self.episode_returns.append(self.last_mean_reward)
                 self.timesteps.append(self.num_timesteps)
 
-                # --- エントロピー取得処理（CUDA Tensorに対応） ---
+                # --- 1. エントロピー取得処理 ---
                 with torch.no_grad():
                     replay_data = self.model.replay_buffer.sample(256)
                     obs_tensor = replay_data.observations
                     
-                    # アクション分布から log_prob を計算し、エントロピー (-log_prob) を求める
-                    mean_actions, log_std, kwargs = self.model.actor.get_action_dist_params(obs_tensor)
-                    _, log_prob = self.model.actor.action_dist.log_prob_from_params(mean_actions, log_std, **kwargs)
+                    mean_actions, log_std, kwargs_dist = self.model.actor.get_action_dist_params(obs_tensor)
+                    _, log_prob = self.model.actor.action_dist.log_prob_from_params(mean_actions, log_std, **kwargs_dist)
                     entropy = (-log_prob).mean().item()
 
                 self.entropies.append(entropy)
+
+                # --- 2. ロス取得処理 (SB3のloggerから安全に取得) ---
+                logger_vals = self.model.logger.name_to_value
+                actor_loss = logger_vals.get("train/actor_loss", np.nan)
+                critic_loss = logger_vals.get("train/critic_loss", np.nan)
+                
+                self.actor_losses.append(actor_loss)
+                self.critic_losses.append(critic_loss)
 
         return result
 
@@ -53,7 +62,7 @@ def main():
 
     start_time = time.time()
     print("=========================================")
-    print(" Starting Humanoid-v5 Standard SAC BASELINE")
+    print(" Starting Humanoid-v5 SAC + Model Save & Loss Tracking")
     print(f" Total Runs: {NUM_SEEDS} runs")
     print("=========================================")
 
@@ -96,13 +105,25 @@ def main():
             timesteps=np.array(callback.timesteps),
         )
 
+        # 3. ロスデータ保存（追加）
+        np.savez(
+            f"{SAVE_DIR}/{prefix}_run{i}_loss.npz",
+            actor_loss=np.array(callback.actor_losses),
+            critic_loss=np.array(callback.critic_losses),
+            timesteps=np.array(callback.timesteps),
+        )
+
+        # 4. モデルの重みを保存（追加）
+        model_save_path = f"{SAVE_DIR}/{prefix}_run{i}_model.zip"
+        model.save(model_save_path)
+
         train_env.close()
         eval_env.close()
-        print(f"Baseline Run {i+1} Done. Saved returns & entropy.")
+        print(f"✅ Baseline Run {i+1} Done. Saved returns, entropy, loss, & model (.zip).")
 
     end_time = time.time()
     duration = (end_time - start_time) / 3600
-    print(f"\n🎉 標準SACベースライン（{NUM_SEEDS} runs）の実行が完了しました！")
+    print(f"\n🎉 すべての処理が完了しました！")
     print(f"総所要時間: {duration:.2f} 時間")
 
 if __name__ == "__main__":
