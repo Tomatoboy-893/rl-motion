@@ -1,1 +1,2 @@
-enjoy_humanoid.py は学習したモデルをレンダリングして動画化するコード
+enjoy_humanoid.py は学習したモデルをレンダリングして動画化するコード\n
+plot_ross_results.pyはロスを収集
