@@ -65,7 +65,7 @@ class FixedLossCallback(EvalCallback):
 def main():
     # 動作確認のためまずは短めのステップ（例: 50,000ステップ）でテスト
     # 本番同様に回す場合は 3_000_000 にしてください
-    TOTAL_STEPS = 50_000 
+    TOTAL_STEPS = 3_000_000 
     
     print("=========================================")
     print(" Re-checking Loss Tracking (Test Run)")
