@@ -1,3 +1,5 @@
+# compare_gaussian_sacbase.py
+
 import os
 import time
 import numpy as np
@@ -12,22 +14,17 @@ SAVE_DIR = "./npz_logs_humanoid"
 os.makedirs(SAVE_DIR, exist_ok=True)
 
 # ==========================================
-# 1. 固定事前分布（Gaussian Prior / rho）付き SAC クラス
+# 1. ロス記録機能を持つ共通のベースクラス
 # ==========================================
-class SACWithFixedPrior(SAC):
-    def __init__(self, *args, prior_std=1.0, beta_kl=0.01, **kwargs):
+class SACHistoryLogger(SAC):
+    def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.prior_std = prior_std
-        self.beta_kl = beta_kl
-        
-        # ロスを蓄積するためのバッファ
         self.actor_losses_history = []
         self.critic_losses_history = []
 
     def train(self, gradient_steps: int, batch_size: int = 64) -> None:
         super().train(gradient_steps, batch_size)
         
-        # ロガーからロスを回収
         logger_vals = self.logger.name_to_value
         if "train/actor_loss" in logger_vals:
             val = logger_vals["train/actor_loss"]
@@ -38,9 +35,18 @@ class SACWithFixedPrior(SAC):
             if val is not None and not np.isnan(val):
                 self.critic_losses_history.append(val)
 
+# ==========================================
+# 2. 固定事前分布（Gaussian Prior / rho）付き SAC クラス
+# ==========================================
+class SACWithFixedPrior(SACHistoryLogger):
+    def __init__(self, *args, prior_std=1.0, beta_kl=0.01, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.prior_std = prior_std
+        self.beta_kl = beta_kl
+
 
 # ==========================================
-# 2. 評価・リターン・エントロピー記録用コールバック
+# 3. 評価・リターン・エントロピー記録用コールバック
 # ==========================================
 class MetricsCallback(EvalCallback):
     def __init__(self, model_ref, *args, **kwargs):
@@ -89,7 +95,7 @@ class MetricsCallback(EvalCallback):
 
 
 # ==========================================
-# 3. 実験実行メイン関数
+# 4. 実験実行メイン関数
 # ==========================================
 def run_experiment(algo_type, rho_value=None, seed=0, total_steps=3_000_000):
     print(f"\n=========================================")
@@ -113,7 +119,7 @@ def run_experiment(algo_type, rho_value=None, seed=0, total_steps=3_000_000):
         )
         prefix = f"gaussian_rho{rho_value}_seed{seed}"
     else:
-        model = SAC(
+        model = SACHistoryLogger(
             "MlpPolicy",
             train_env,
             learning_rate=3e-4,
@@ -148,7 +154,6 @@ def run_experiment(algo_type, rho_value=None, seed=0, total_steps=3_000_000):
     eval_env.close()
 
 def main():
-    # 複数シード（例: seed=0）で実行する場合
     seeds = [0] 
     
     for seed in seeds:
