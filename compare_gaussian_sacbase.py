@@ -99,11 +99,12 @@ class MetricsCallback(EvalCallback):
 # ==========================================
 def run_experiment(algo_type, rho_value=None, seed=0, total_steps=3_000_000):
     print(f"\n=========================================")
-    print(f" Starting HalfCheetah: {algo_type.upper()} (rho={rho_value}), Seed={seed}")
+    print(f" Starting HalfCheetah-v5: {algo_type.upper()} (rho={rho_value}), Seed={seed}")
     print(f"=========================================")
     
-    train_env = make_vec_env("HalfCheetah-v4", n_envs=8, seed=seed)
-    eval_env = gym.make("HalfCheetah-v4")
+    # v5に変更
+    train_env = make_vec_env("HalfCheetah-v5", n_envs=8, seed=seed)
+    eval_env = gym.make("HalfCheetah-v5")
     eval_env.reset(seed=seed)
     
     if algo_type == "gaussian":
@@ -146,9 +147,9 @@ def run_experiment(algo_type, rho_value=None, seed=0, total_steps=3_000_000):
     np.savez(f"{SAVE_DIR}/{prefix}_entropy.npz", entropy=np.array(callback.entropies), timesteps=np.array(callback.timesteps))
     np.savez(f"{SAVE_DIR}/{prefix}_loss.npz", actor_loss=np.array(callback.actor_losses), critic_loss=np.array(callback.critic_losses), timesteps=np.array(callback.timesteps))
     
-    # 後からのモデル重みの保存
+    # モデルの保存
     model.save(f"{SAVE_DIR}/{prefix}_model.zip")
-    print(f"💾 半チーター用モデルとログの保存が完了しました: {prefix}")
+    print(f"💾 半チーター(v5)用モデルとログの保存が完了しました: {prefix}")
     
     train_env.close()
     eval_env.close()
