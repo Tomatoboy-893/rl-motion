@@ -1,8 +1,8 @@
-
 import numpy as np
 import matplotlib.pyplot as plt
 
-SAVE_DIR = "./npz_logs_humanoid"
+# 半チーター用のディレクトリに変更
+SAVE_DIR = "./npz_logs_halfcheetah"
 seed = 0
 
 # ファイル名の定義
@@ -28,12 +28,12 @@ plt.plot(base_data["timesteps"], base_data["returns"], label="SAC Baseline", col
 plt.plot(gauss_data["timesteps"], gauss_data["returns"], label="Gaussian Prior (rho=1.0)", color="tab:orange", alpha=0.8)
 plt.xlabel("Timesteps", fontsize=12)
 plt.ylabel("Mean Episode Return", fontsize=12)
-plt.title("Humanoid-v5: Episode Return Comparison", fontsize=14)
+plt.title("HalfCheetah-v5: Episode Return Comparison", fontsize=14)
 plt.grid(True)
 plt.legend(fontsize=11)
 plt.tight_layout()
 
-return_path = f"{SAVE_DIR}/humanoid_comparison_return.png"
+return_path = f"{SAVE_DIR}/halfcheetah_comparison_return.png"
 plt.savefig(return_path, dpi=300)
 plt.close()
 print(f"📈 1. リターンのグラフを保存しました: {return_path}")
@@ -47,12 +47,12 @@ plt.plot(base_ent["timesteps"], base_ent["entropy"], label="SAC Baseline", color
 plt.plot(gauss_ent["timesteps"], gauss_ent["entropy"], label="Gaussian Prior (rho=1.0)", color="tab:orange", alpha=0.8)
 plt.xlabel("Timesteps", fontsize=12)
 plt.ylabel("Policy Entropy", fontsize=12)
-plt.title("Humanoid-v5: Policy Entropy Comparison", fontsize=14)
+plt.title("HalfCheetah-v5: Policy Entropy Comparison", fontsize=14)
 plt.grid(True)
 plt.legend(fontsize=11)
 plt.tight_layout()
 
-entropy_path = f"{SAVE_DIR}/humanoid_comparison_entropy.png"
+entropy_path = f"{SAVE_DIR}/halfcheetah_comparison_entropy.png"
 plt.savefig(entropy_path, dpi=300)
 plt.close()
 print(f"📈 2. エントロピーのグラフを保存しました: {entropy_path}")
@@ -82,9 +82,9 @@ axes[1].grid(True)
 axes[1].legend(fontsize=11)
 
 plt.tight_layout()
-loss_path = f"{SAVE_DIR}/humanoid_comparison_loss.png"
+loss_path = f"{SAVE_DIR}/halfcheetah_comparison_loss.png"
 plt.savefig(loss_path, dpi=300)
 plt.close()
 print(f"📈 3. ロス（Actor/Critic）のグラフを保存しました: {loss_path}")
 
-print("\n✨ すべての個別グラフの生成が完了しました！")
+print("\n✨ 半チーターのすべての個別グラフの生成が完了しました！")
