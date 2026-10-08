@@ -1,4 +1,3 @@
-cat << 'EOF' > plot_actor_critic_loss.py
 import os
 import numpy as np
 import matplotlib.pyplot as plt
@@ -87,6 +86,3 @@ def plot_loss_type(loss_key_name, title_str, filename_str):
 # Actor Loss と Critic Loss をそれぞれ生成
 plot_loss_type("actor", "Actor Loss", "humanoid_actor_loss_comparison.png")
 plot_loss_type("critic", "Critic Loss", "humanoid_critic_loss_comparison.png")
-EOF
-
-python plot_actor_critic_loss.py
