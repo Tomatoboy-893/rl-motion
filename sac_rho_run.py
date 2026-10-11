@@ -1,4 +1,4 @@
-# sac_rho_run.py (Comparison: SAC vs ADR (std=1.0) vs ADR (std=2.0))
+# sac_rho_run.py (Comprehensive Comparison & Full Metrics Export)
 import os
 import numpy as np
 import matplotlib.pyplot as plt
@@ -7,12 +7,12 @@ import gymnasium as gym
 from stable_baselines3 import SAC
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.callbacks import EvalCallback
-from sac_adr_main import SACWithFixedPrior
+from sac_adr_main import SACWithFixedPrior, SACWithMovingAveragePrior
 
 os.environ["MUJOCO_GL"] = "egl"
 os.environ["PYOPENGL_PLATFORM"] = "egl"
 
-SAVE_DIR = "./npz_logs_full_comparison"
+SAVE_DIR = "./npz_logs_comprehensive_comparison"
 os.makedirs(SAVE_DIR, exist_ok=True)
 
 # ===============================
@@ -68,6 +68,12 @@ def run_experiment(algo_key, seed, total_timesteps):
             beta_kl=0.01, beta_lr=1e-3, target_kl=1.0,
             prior_std=2.0, verbose=0
         )
+    elif algo_key == "adr_moving_avg":
+        model = SACWithMovingAveragePrior(
+            "MlpPolicy", train_env,
+            beta_kl=0.01, beta_lr=1e-3, target_kl=1.0,
+            prior_std=1.0, tau=0.005, use_value_filter=True, verbose=0
+        )
     else:
         raise ValueError(f"Unknown algo_key: {algo_key}")
 
@@ -112,81 +118,107 @@ def run_5seeds(algo_key, total_timesteps):
     return t, mean, std, models
 
 # ===============================
-# メイン処理（比較実行）
+# メイン処理（比較実行と4指標の出力）
 # ===============================
 def main():
     TOTAL_STEPS = 3_000_000
 
-    # 3つの条件で実行
+    # 4つの条件で実行
     print("===== 1. Running Standard SAC =====")
     t_sac, mean_sac, std_sac, models_sac = run_5seeds("sac", TOTAL_STEPS)
 
-    print("===== 2. Running ADR (prior_std=1.0) =====")
+    print("===== 2. Running ADR (std=1.0) =====")
     t_adr1, mean_adr1, std_adr1, models_adr1 = run_5seeds("adr_std1.0", TOTAL_STEPS)
 
-    print("===== 3. Running ADR (prior_std=2.0) =====")
+    print("===== 3. Running ADR (std=2.0) =====")
     t_adr2, mean_adr2, std_adr2, models_adr2 = run_5seeds("adr_std2.0", TOTAL_STEPS)
 
+    print("===== 4. Running ADR (Moving Average Prior) =====")
+    t_ma, mean_ma, std_ma, models_ma = run_5seeds("adr_moving_avg", TOTAL_STEPS)
+
     # ===============================
-    # 1. リターンの比較グラフ
+    # 指標1: リターンの比較グラフ
     # ===============================
-    plt.figure(figsize=(9, 6))
-    plt.plot(t_sac, mean_sac, label="Standard SAC", color="tab:blue")
-    plt.fill_between(t_sac, mean_sac - std_sac, mean_sac + std_sac, color="tab:blue", alpha=0.2)
+    plt.figure(figsize=(10, 6))
+    plt.plot(t_sac, mean_sac, label="Standard SAC", color="tab:blue", linewidth=2)
+    plt.fill_between(t_sac, mean_sac - std_sac, mean_sac + std_sac, color="tab:blue", alpha=0.15)
 
-    plt.plot(t_adr1, mean_adr1, label="ADR (std=1.0)", color="tab:orange")
-    plt.fill_between(t_adr1, mean_adr1 - std_adr1, mean_adr1 + std_adr1, color="tab:orange", alpha=0.2)
+    plt.plot(t_adr1, mean_adr1, label="ADR (std=1.0)", color="tab:orange", linewidth=2)
+    plt.fill_between(t_adr1, mean_adr1 - std_adr1, mean_adr1 + std_adr1, color="tab:orange", alpha=0.15)
 
-    plt.plot(t_adr2, mean_adr2, label="ADR (std=2.0)", color="tab:green")
-    plt.fill_between(t_adr2, mean_adr2 - std_adr2, mean_adr2 + std_adr2, color="tab:green", alpha=0.2)
+    plt.plot(t_adr2, mean_adr2, label="ADR (std=2.0)", color="tab:green", linewidth=2)
+    plt.fill_between(t_adr2, mean_adr2 - std_adr2, mean_adr2 + std_adr2, color="tab:green", alpha=0.15)
 
-    plt.xlabel("Timesteps")
-    plt.ylabel("Mean Episodic Return")
-    plt.title("Comparison: Return (SAC vs ADR std=1.0 vs ADR std=2.0)")
-    plt.grid(True)
-    plt.legend()
+    plt.plot(t_ma, mean_ma, label="ADR (Moving Avg Prior)", color="tab:purple", linewidth=2)
+    plt.fill_between(t_ma, mean_ma - std_ma, mean_ma + std_ma, color="tab:purple", alpha=0.15)
+
+    plt.xlabel("Timesteps", fontsize=12)
+    plt.ylabel("Mean Episodic Return", fontsize=12)
+    plt.title("Comprehensive Comparison: Return (HalfCheetah-v5)", fontsize=14)
+    plt.grid(True, linestyle="--", alpha=0.6)
+    plt.legend(fontsize=11)
     plt.tight_layout()
-    plt.savefig(f"{SAVE_DIR}/comparison_returns.png")
+    plt.savefig(f"{SAVE_DIR}/comprehensive_comparison_returns.png", dpi=300)
     plt.close()
 
     # ===============================
-    # 2. エントロピーの比較グラフ（ADR 2種）
+    # 指標2: プライオ平均のノルム軌跡（移動平均版）
     # ===============================
-    m1 = models_adr1[0]
-    m2 = models_adr2[0]
+    m_ma = models_ma[0]
+    if hasattr(m_ma, "prior_mean_logs") and len(m_ma.prior_mean_logs) > 0:
+        plt.figure(figsize=(8, 5))
+        mean_norms = [np.linalg.norm(m) for m in m_ma.prior_mean_logs]
+        plt.plot(mean_norms, label="Norm of Dynamic Prior Mean ||μ_ρ||", color="tab:purple", linewidth=1.5)
+        plt.title("Evolution of Moving Average Prior Mean Norm", fontsize=13)
+        plt.xlabel("Updates", fontsize=11)
+        plt.ylabel("L2 Norm", fontsize=11)
+        plt.grid(True, linestyle="--", alpha=0.6)
+        plt.legend(fontsize=11)
+        plt.tight_layout()
+        plt.savefig(f"{SAVE_DIR}/moving_avg_prior_mean_norm.png", dpi=300)
+        plt.close()
 
+    # ===============================
+    # 指標3: KLダイバージェンスの比較グラフ
+    # ===============================
     plt.figure(figsize=(8, 5))
-    if hasattr(m1, "pi_entropies") and len(m1.pi_entropies) > 0:
-        plt.plot(m1.pi_entropies, label="ADR (std=1.0)", color="tab:orange")
-    if hasattr(m2, "pi_entropies") and len(m2.pi_entropies) > 0:
-        plt.plot(m2.pi_entropies, label="ADR (std=2.0)", color="tab:green")
-    plt.title("Comparison: Pi Entropy over updates")
-    plt.xlabel("Updates")
-    plt.ylabel("Entropy")
-    plt.grid(True)
-    plt.legend()
+    if hasattr(models_adr1[0], "kl_values") and len(models_adr1[0].kl_values) > 0:
+        plt.plot(models_adr1[0].kl_values, label="ADR (std=1.0)", color="tab:orange", alpha=0.8)
+    if hasattr(models_adr2[0], "kl_values") and len(models_adr2[0].kl_values) > 0:
+        plt.plot(models_adr2[0].kl_values, label="ADR (std=2.0)", color="tab:green", alpha=0.8)
+    if hasattr(m_ma, "kl_values") and len(m_ma.kl_values) > 0:
+        plt.plot(m_ma.kl_values, label="ADR (Moving Avg)", color="tab:purple", alpha=0.8)
+
+    plt.title("Comparison: KL(π||ρ) over updates", fontsize=13)
+    plt.xlabel("Updates", fontsize=11)
+    plt.ylabel("KL Divergence", fontsize=11)
+    plt.grid(True, linestyle="--", alpha=0.6)
+    plt.legend(fontsize=11)
     plt.tight_layout()
-    plt.savefig(f"{SAVE_DIR}/comparison_entropy.png")
+    plt.savefig(f"{SAVE_DIR}/comprehensive_comparison_kl.png", dpi=300)
     plt.close()
 
     # ===============================
-    # 3. ロス / KLの比較グラフ（ADR 2種）
+    # 指標4: 方策のエントロピー（Policy Entropy）の比較グラフ
     # ===============================
     plt.figure(figsize=(8, 5))
-    if hasattr(m1, "kl_values") and len(m1.kl_values) > 0:
-        plt.plot(m1.kl_values, label="ADR (std=1.0) KL", color="tab:orange")
-    if hasattr(m2, "kl_values") and len(m2.kl_values) > 0:
-        plt.plot(m2.kl_values, label="ADR (std=2.0) KL", color="tab:green")
-    plt.title("Comparison: KL(π||ρ) over updates")
-    plt.xlabel("Updates")
-    plt.ylabel("KL Divergence")
-    plt.grid(True)
-    plt.legend()
+    if hasattr(models_adr1[0], "pi_entropies") and len(models_adr1[0].pi_entropies) > 0:
+        plt.plot(models_adr1[0].pi_entropies, label="ADR (std=1.0)", color="tab:orange", alpha=0.8)
+    if hasattr(models_adr2[0], "pi_entropies") and len(models_adr2[0].pi_entropies) > 0:
+        plt.plot(models_adr2[0].pi_entropies, label="ADR (std=2.0)", color="tab:green", alpha=0.8)
+    if hasattr(m_ma, "pi_entropies") and len(m_ma.pi_entropies) > 0:
+        plt.plot(m_ma.pi_entropies, label="ADR (Moving Avg)", color="tab:purple", alpha=0.8)
+
+    plt.title("Comparison: Pi Entropy over updates", fontsize=13)
+    plt.xlabel("Updates", fontsize=11)
+    plt.ylabel("Entropy", fontsize=11)
+    plt.grid(True, linestyle="--", alpha=0.6)
+    plt.legend(fontsize=11)
     plt.tight_layout()
-    plt.savefig(f"{SAVE_DIR}/comparison_kl_loss.png")
+    plt.savefig(f"{SAVE_DIR}/comprehensive_comparison_entropy.png", dpi=300)
     plt.close()
 
-    print(f"[Saved] All comparison graphs and models to {SAVE_DIR}/")
+    print(f"[Saved] All 4 metrics and graphs to {SAVE_DIR}/")
 
 if __name__ == "__main__":
     main()
