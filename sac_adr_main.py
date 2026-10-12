@@ -171,7 +171,7 @@ class SACWithMovingAveragePrior(SACWithFixedPrior):
                     current_q1, current_q2 = self.critic(obs, actions_pi)
                     current_q = torch.min(current_q1, current_q2)
                     q_median = current_q.median()
-                    mask = current_q >= q_median
+                    mask = (current_q >= q_median).squeeze(-1)  # 修正点
                     
                     if mask.sum() > 0:
                         filtered_actions = actions_pi[mask]
