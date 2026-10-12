@@ -59,7 +59,7 @@ def run_experiment(seed, total_timesteps):
         prior_std=1.0, tau=0.005, use_value_filter=True, verbose=0
     )
 
-    model.learn(total_timesteps=total_timesteps, callback=callback, progress_bar=True)
+    model.learn(total_timesteps=total_timesteps, callback=callback, progress_bar=False)
 
     # モデルの保存
     model.save(f"{SAVE_DIR}/adr_moving_avg_seed{seed}_model")
