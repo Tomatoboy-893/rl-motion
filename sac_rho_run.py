@@ -1,18 +1,17 @@
-# sac_rho_run.py (Comprehensive Comparison & Full Metrics Export)
+# sac_rho_run.py (Moving Average Prior - Single Method 5-Seed Run & Metrics Export)
 import os
 import numpy as np
 import matplotlib.pyplot as plt
 import gymnasium as gym
 
-from stable_baselines3 import SAC
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.callbacks import EvalCallback
-from sac_adr_main import SACWithFixedPrior, SACWithMovingAveragePrior
+from sac_adr_main import SACWithMovingAveragePrior
 
 os.environ["MUJOCO_GL"] = "egl"
 os.environ["PYOPENGL_PLATFORM"] = "egl"
 
-SAVE_DIR = "./npz_logs_comprehensive_comparison"
+SAVE_DIR = "./npz_logs_moving_average_prior"
 os.makedirs(SAVE_DIR, exist_ok=True)
 
 # ===============================
@@ -41,9 +40,9 @@ def make_envs(seed):
     return train_env, eval_env
 
 # ===============================
-# 単一シードの実験実行関数
+# 単一シードの実験実行関数（移動平均プライオ専用）
 # ===============================
-def run_experiment(algo_key, seed, total_timesteps):
+def run_experiment(seed, total_timesteps):
     train_env, eval_env = make_envs(seed)
 
     callback = UnifiedReturnCallback(
@@ -54,33 +53,16 @@ def run_experiment(algo_key, seed, total_timesteps):
         render=False
     )
 
-    if algo_key == "sac":
-        model = SAC("MlpPolicy", train_env, verbose=0)
-    elif algo_key == "adr_std1.0":
-        model = SACWithFixedPrior(
-            "MlpPolicy", train_env,
-            beta_kl=0.01, beta_lr=1e-3, target_kl=1.0,
-            prior_std=1.0, verbose=0
-        )
-    elif algo_key == "adr_std2.0":
-        model = SACWithFixedPrior(
-            "MlpPolicy", train_env,
-            beta_kl=0.01, beta_lr=1e-3, target_kl=1.0,
-            prior_std=2.0, verbose=0
-        )
-    elif algo_key == "adr_moving_avg":
-        model = SACWithMovingAveragePrior(
-            "MlpPolicy", train_env,
-            beta_kl=0.01, beta_lr=1e-3, target_kl=1.0,
-            prior_std=1.0, tau=0.005, use_value_filter=True, verbose=0
-        )
-    else:
-        raise ValueError(f"Unknown algo_key: {algo_key}")
+    model = SACWithMovingAveragePrior(
+        "MlpPolicy", train_env,
+        beta_kl=0.01, beta_lr=1e-3, target_kl=1.0,
+        prior_std=1.0, tau=0.005, use_value_filter=True, verbose=0
+    )
 
     model.learn(total_timesteps=total_timesteps, callback=callback, progress_bar=True)
 
     # モデルの保存
-    model.save(f"{SAVE_DIR}/{algo_key}_seed{seed}_model")
+    model.save(f"{SAVE_DIR}/adr_moving_avg_seed{seed}_model")
 
     train_env.close()
     eval_env.close()
@@ -88,22 +70,24 @@ def run_experiment(algo_key, seed, total_timesteps):
     t = np.array(callback.timesteps)
     r = np.array(callback.episode_returns)
 
-    np.savez(f"{SAVE_DIR}/{algo_key}_seed{seed}.npz", timesteps=t, returns=r)
-    print(f"[Saved] {SAVE_DIR}/{algo_key}_seed{seed}.npz & model")
+    np.savez(f"{SAVE_DIR}/adr_moving_avg_seed{seed}.npz", timesteps=t, returns=r)
+    print(f"[Saved] {SAVE_DIR}/adr_moving_avg_seed{seed}.npz & model")
 
     return t, r, model
 
 # ===============================
-# 5シード実行 + 平均・標準偏差の計算
+# メイン処理（5シード実行と4指標の可視化）
 # ===============================
-def run_5seeds(algo_key, total_timesteps):
+def main():
+    TOTAL_STEPS = 3_000_000
     all_returns = []
     models = []
     t = None
 
+    print("===== Running ADR (Moving Average Prior) - 5 Seeds =====")
     for seed in range(5):
-        print(f"[{algo_key.upper()}] Seed {seed} running...")
-        t, r, model = run_experiment(algo_key, seed, total_timesteps)
+        print(f"--- Seed {seed} running ---")
+        t, r, model = run_experiment(seed, TOTAL_STEPS)
         all_returns.append(r)
         models.append(model)
 
@@ -111,60 +95,31 @@ def run_5seeds(algo_key, total_timesteps):
     mean = all_returns.mean(axis=0)
     std = all_returns.std(axis=0)
 
+    # 5シード平均・標準偏差の保存
     np.savez(
-        f"{SAVE_DIR}/{algo_key}_5seed_mean_std.npz",
+        f"{SAVE_DIR}/adr_moving_avg_5seed_mean_std.npz",
         timesteps=t, mean=mean, std=std, all_returns=all_returns
     )
-    return t, mean, std, models
-
-# ===============================
-# メイン処理（比較実行と4指標の出力）
-# ===============================
-def main():
-    TOTAL_STEPS = 3_000_000
-
-    # 4つの条件で実行
-    print("===== 1. Running Standard SAC =====")
-    t_sac, mean_sac, std_sac, models_sac = run_5seeds("sac", TOTAL_STEPS)
-
-    print("===== 2. Running ADR (std=1.0) =====")
-    t_adr1, mean_adr1, std_adr1, models_adr1 = run_5seeds("adr_std1.0", TOTAL_STEPS)
-
-    print("===== 3. Running ADR (std=2.0) =====")
-    t_adr2, mean_adr2, std_adr2, models_adr2 = run_5seeds("adr_std2.0", TOTAL_STEPS)
-
-    print("===== 4. Running ADR (Moving Average Prior) =====")
-    t_ma, mean_ma, std_ma, models_ma = run_5seeds("adr_moving_avg", TOTAL_STEPS)
 
     # ===============================
-    # 指標1: リターンの比較グラフ
+    # 1. 学習曲線（Mean Episodic Return ± std）
     # ===============================
-    plt.figure(figsize=(10, 6))
-    plt.plot(t_sac, mean_sac, label="Standard SAC", color="tab:blue", linewidth=2)
-    plt.fill_between(t_sac, mean_sac - std_sac, mean_sac + std_sac, color="tab:blue", alpha=0.15)
-
-    plt.plot(t_adr1, mean_adr1, label="ADR (std=1.0)", color="tab:orange", linewidth=2)
-    plt.fill_between(t_adr1, mean_adr1 - std_adr1, mean_adr1 + std_adr1, color="tab:orange", alpha=0.15)
-
-    plt.plot(t_adr2, mean_adr2, label="ADR (std=2.0)", color="tab:green", linewidth=2)
-    plt.fill_between(t_adr2, mean_adr2 - std_adr2, mean_adr2 + std_adr2, color="tab:green", alpha=0.15)
-
-    plt.plot(t_ma, mean_ma, label="ADR (Moving Avg Prior)", color="tab:purple", linewidth=2)
-    plt.fill_between(t_ma, mean_ma - std_ma, mean_ma + std_ma, color="tab:purple", alpha=0.15)
-
-    plt.xlabel("Timesteps", fontsize=12)
-    plt.ylabel("Mean Episodic Return", fontsize=12)
-    plt.title("Comprehensive Comparison: Return (HalfCheetah-v5)", fontsize=14)
+    plt.figure(figsize=(8, 5))
+    plt.plot(t, mean, label="ADR (Moving Avg Prior)", color="tab:purple", linewidth=2)
+    plt.fill_between(t, mean - std, mean + std, color="tab:purple", alpha=0.2)
+    plt.xlabel("Timesteps", fontsize=11)
+    plt.ylabel("Mean Episodic Return", fontsize=11)
+    plt.title("Learning Curve: ADR (Moving Average Prior)", fontsize=13)
     plt.grid(True, linestyle="--", alpha=0.6)
     plt.legend(fontsize=11)
     plt.tight_layout()
-    plt.savefig(f"{SAVE_DIR}/comprehensive_comparison_returns.png", dpi=300)
+    plt.savefig(f"{SAVE_DIR}/moving_avg_returns.png", dpi=300)
     plt.close()
 
     # ===============================
-    # 指標2: プライオ平均のノルム軌跡（移動平均版）
+    # 2. プライオ平均のノルム軌跡（seed 0）
     # ===============================
-    m_ma = models_ma[0]
+    m_ma = models[0]
     if hasattr(m_ma, "prior_mean_logs") and len(m_ma.prior_mean_logs) > 0:
         plt.figure(figsize=(8, 5))
         mean_norms = [np.linalg.norm(m) for m in m_ma.prior_mean_logs]
@@ -179,46 +134,36 @@ def main():
         plt.close()
 
     # ===============================
-    # 指標3: KLダイバージェンスの比較グラフ
+    # 3. KLダイバージェンスの推移（seed 0）
     # ===============================
-    plt.figure(figsize=(8, 5))
-    if hasattr(models_adr1[0], "kl_values") and len(models_adr1[0].kl_values) > 0:
-        plt.plot(models_adr1[0].kl_values, label="ADR (std=1.0)", color="tab:orange", alpha=0.8)
-    if hasattr(models_adr2[0], "kl_values") and len(models_adr2[0].kl_values) > 0:
-        plt.plot(models_adr2[0].kl_values, label="ADR (std=2.0)", color="tab:green", alpha=0.8)
     if hasattr(m_ma, "kl_values") and len(m_ma.kl_values) > 0:
-        plt.plot(m_ma.kl_values, label="ADR (Moving Avg)", color="tab:purple", alpha=0.8)
-
-    plt.title("Comparison: KL(π||ρ) over updates", fontsize=13)
-    plt.xlabel("Updates", fontsize=11)
-    plt.ylabel("KL Divergence", fontsize=11)
-    plt.grid(True, linestyle="--", alpha=0.6)
-    plt.legend(fontsize=11)
-    plt.tight_layout()
-    plt.savefig(f"{SAVE_DIR}/comprehensive_comparison_kl.png", dpi=300)
-    plt.close()
+        plt.figure(figsize=(8, 5))
+        plt.plot(m_ma.kl_values, label="KL(π||ρ)", color="tab:purple", alpha=0.8)
+        plt.title("KL(π||ρ) over updates (Moving Average)", fontsize=13)
+        plt.xlabel("Updates", fontsize=11)
+        plt.ylabel("KL Divergence", fontsize=11)
+        plt.grid(True, linestyle="--", alpha=0.6)
+        plt.legend(fontsize=11)
+        plt.tight_layout()
+        plt.savefig(f"{SAVE_DIR}/moving_avg_kl.png", dpi=300)
+        plt.close()
 
     # ===============================
-    # 指標4: 方策のエントロピー（Policy Entropy）の比較グラフ
+    # 4. 方策エントロピーの推移（seed 0）
     # ===============================
-    plt.figure(figsize=(8, 5))
-    if hasattr(models_adr1[0], "pi_entropies") and len(models_adr1[0].pi_entropies) > 0:
-        plt.plot(models_adr1[0].pi_entropies, label="ADR (std=1.0)", color="tab:orange", alpha=0.8)
-    if hasattr(models_adr2[0], "pi_entropies") and len(models_adr2[0].pi_entropies) > 0:
-        plt.plot(models_adr2[0].pi_entropies, label="ADR (std=2.0)", color="tab:green", alpha=0.8)
     if hasattr(m_ma, "pi_entropies") and len(m_ma.pi_entropies) > 0:
-        plt.plot(m_ma.pi_entropies, label="ADR (Moving Avg)", color="tab:purple", alpha=0.8)
+        plt.figure(figsize=(8, 5))
+        plt.plot(m_ma.pi_entropies, label="Pi Entropy", color="tab:purple", alpha=0.8)
+        plt.title("Policy Entropy over updates (Moving Average)", fontsize=13)
+        plt.xlabel("Updates", fontsize=11)
+        plt.ylabel("Entropy", fontsize=11)
+        plt.grid(True, linestyle="--", alpha=0.6)
+        plt.legend(fontsize=11)
+        plt.tight_layout()
+        plt.savefig(f"{SAVE_DIR}/moving_avg_entropy.png", dpi=300)
+        plt.close()
 
-    plt.title("Comparison: Pi Entropy over updates", fontsize=13)
-    plt.xlabel("Updates", fontsize=11)
-    plt.ylabel("Entropy", fontsize=11)
-    plt.grid(True, linestyle="--", alpha=0.6)
-    plt.legend(fontsize=11)
-    plt.tight_layout()
-    plt.savefig(f"{SAVE_DIR}/comprehensive_comparison_entropy.png", dpi=300)
-    plt.close()
-
-    print(f"[Saved] All 4 metrics and graphs to {SAVE_DIR}/")
+    print(f"[Saved] All metrics and graphs for Moving Average Prior to {SAVE_DIR}/")
 
 if __name__ == "__main__":
     main()
