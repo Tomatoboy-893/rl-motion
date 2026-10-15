@@ -8,10 +8,8 @@ from stable_baselines3 import SAC
 from stable_baselines3.common.utils import polyak_update
 
 
-# ===============
-# 事前分布の平均をポリシーの平均にするカスタムSACクラス
-# ===============
 class SACWithPolicyMeanPrior(SAC):
+    """事前分布の平均を現在のポリシー平均（detach版）にするカスタムSACクラス"""
 
     def __init__(
         self,
@@ -40,11 +38,12 @@ class SACWithPolicyMeanPrior(SAC):
         self.beta_optimizer = torch.optim.Adam([self.log_beta], lr=beta_lr)
         self.target_kl = act_dim * target_kl
 
+        # ログ蓄積用リスト
         self.kl_values = []
         self.beta_logs = []
         self.pi_entropies = []
         self.alpha_logs = []
-        self.prior_mean_logs = [] # ログ用
+        self.prior_mean_logs = []
 
     @staticmethod
     def kl_diag_gaussians(mu1, log_std1, mu2, log_std2):
@@ -86,7 +85,7 @@ class SACWithPolicyMeanPrior(SAC):
             critic_loss.backward()
             self.critic.optimizer.step()
 
-            # 2. ポリシーの分布パラメータを取得（ここで現在のポリシー平均がわかる）
+            # 2. ポリシーの分布パラメータを取得
             pi_mean, pi_log_std, _ = self.actor.get_action_dist_params(obs)
             pi_log_std = torch.clamp(pi_log_std, -20.0, 2.0)
             pi_dist = Normal(pi_mean, torch.exp(pi_log_std))
@@ -94,12 +93,10 @@ class SACWithPolicyMeanPrior(SAC):
             entropy = pi_dist.entropy().sum(dim=-1).mean()
             self.pi_entropies.append(float(entropy.detach().cpu()))
 
-            # --- ★ ここが今回のポイント：事前分布の平均を「ポリシーの平均」にする ---
-            # バッチ全体でのポリシー平均（あるいはサンプルごとの平均）を事前分布の平均 μ_rho とする
-            # .detach() をつけることで、事前分布側からポリシー平均への過剰な勾配干渉を防ぐ（アンカーとして機能させる）
-            prior_mean = pi_mean.detach() 
+            # --- ★ 事前分布の平均を「ポリシーの平均」にする ---
+            prior_mean = pi_mean.detach()
             
-            # ログ用として平均のL2ノルムなどを保存
+            # ログ用として平均のバッチ平均ベクトルを保存
             self.prior_mean_logs.append(prior_mean.mean(dim=0).cpu().numpy().copy())
 
             prior_log_std = self.prior_log_std.unsqueeze(0).expand_as(pi_log_std)
@@ -109,7 +106,7 @@ class SACWithPolicyMeanPrior(SAC):
             kl_mean = kl.mean()
             self.kl_values.append(float(kl_mean.detach().cpu()))
 
-            # 4. アクターロス計算 (Q値 + エントロピー + ADRのKL正則化)
+            # 4. アクターロス計算
             actions_pi, log_prob = self.actor.action_log_prob(obs)
             log_prob = log_prob.unsqueeze(-1)
             q_pi = torch.min(*self.critic(obs, actions_pi))
@@ -133,7 +130,7 @@ class SACWithPolicyMeanPrior(SAC):
             alpha = torch.exp(self.log_ent_coef.detach())
             self.alpha_logs.append(float(alpha.cpu()))
 
-            # 6. ADRの正則化係数 β の自動調整 (Target KLに近づける)
+            # 6. ADRの正則化係数 β の自動調整
             beta_loss = -self.log_beta * (kl_mean.detach() - self.target_kl)
             self.beta_optimizer.zero_grad()
             beta_loss.backward()
@@ -147,15 +144,3 @@ class SACWithPolicyMeanPrior(SAC):
                 polyak_update(self.critic.parameters(), self.critic_target.parameters(), self.tau)
 
             self._n_updates += 1
-
-            # 学習が終わった後に、クラスが保持しているリストを `.npz` に書き出す
-            np.savez(
-                f"{SAVE_DIR}/policy_mean_prior_seed{seed}.npz",
-                timesteps=t,
-                returns=r,
-                kl_values=np.array(model.kl_values),
-                pi_entropies=np.array(model.pi_entropies),
-                beta_logs=np.array(model.beta_logs),
-                alpha_logs=np.array(model.alpha_logs),
-                prior_mean_logs=np.array(model.prior_mean_logs)
-            )
