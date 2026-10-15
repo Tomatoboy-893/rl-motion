@@ -147,3 +147,15 @@ class SACWithPolicyMeanPrior(SAC):
                 polyak_update(self.critic.parameters(), self.critic_target.parameters(), self.tau)
 
             self._n_updates += 1
+
+            # 学習が終わった後に、クラスが保持しているリストを `.npz` に書き出す
+            np.savez(
+                f"{SAVE_DIR}/policy_mean_prior_seed{seed}.npz",
+                timesteps=t,
+                returns=r,
+                kl_values=np.array(model.kl_values),
+                pi_entropies=np.array(model.pi_entropies),
+                beta_logs=np.array(model.beta_logs),
+                alpha_logs=np.array(model.alpha_logs),
+                prior_mean_logs=np.array(model.prior_mean_logs)
+            )
