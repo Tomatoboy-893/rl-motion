@@ -30,8 +30,8 @@ class UnifiedReturnCallback(EvalCallback):
 
 def run_experiment(seed, total_timesteps):
     # 学習用・評価用環境の作成
-    train_env = make_vec_env("HalfCheetah-v5", n_envs=1, seed=seed)
-    eval_env = gym.make("HalfCheetah-v5")
+    train_env = make_vec_env("Humanoid-v5", n_envs=1, seed=seed)
+    eval_env = gym.make("Humanoid-v5")
     eval_env.reset(seed=seed + 1000)
 
     callback = UnifiedReturnCallback(
