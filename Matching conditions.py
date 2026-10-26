@@ -181,6 +181,7 @@ def main():
     end_time = time.time()
     duration = (end_time - start_time) / 3600
     print(f"\n🎉 すべてのスケールの実行が完了しました！総所要時間: {duration:.2f} 時間")
+    
 
 
 if __name__ == "__main__":
