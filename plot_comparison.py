@@ -9,39 +9,41 @@ DIR_SAC = "./npz_logs_pure_sac_bs256"
 SAVE_DIR = "./comparison_results"
 os.makedirs(SAVE_DIR, exist_ok=True)
 
+# NumPy 2.0+ 互換の台形積分関数
+trapezoid = getattr(np, "trapezoid", getattr(np, "trapz", None))
+
 def load_data_from_dir(directory, prefix, keys):
     files = sorted(glob.glob(os.path.join(directory, f"{prefix}*.npz")))
     if not files:
         raise FileNotFoundError(f"No files found in {directory} with prefix {prefix}")
     
     data_dict = {key: [] for key in keys}
-    timesteps = None
+    timesteps_list = []
 
     for f in files:
         npz = np.load(f)
-        if timesteps is None:
-            timesteps = npz["timesteps"]
+        timesteps_list.append(npz["timesteps"])
         for key in keys:
             data_dict[key].append(npz[key])
             
-    # シード方向にスタック (Shape: [Num_Seeds, Steps])
+    # 全ファイルの中で最小のデータ長に切り揃え
+    min_len = min(len(arr) for arr in timesteps_list)
     for key in keys:
-        # 長さが異なる場合の安全策（最小長にカット）
-        min_len = min(len(arr) for arr in data_dict[key])
-        data_dict[key] = np.array([arr[:min_len] for arr in data_dict[key]])
+        min_len = min(min_len, min(len(arr) for arr in data_dict[key]))
         
-    min_t_len = min(len(arr) for arr in data_dict[keys[0]])
-    timesteps = timesteps[:min_t_len]
-    
+    timesteps = timesteps_list[0][:min_len]
+    for key in keys:
+        data_dict[key] = np.array([arr[:min_len] for arr in data_dict[key]], dtype=np.float64)
+        
     return timesteps, data_dict
 
 def analyze_and_plot():
     # データの読み込み
     t_prior, prior_data = load_data_from_dir(
-        DIR_PRIOR, "policy_mean_prior_seed", ["returns", "pi_entropies", "kl_values"]
+        DIR_PRIOR, "policy_mean_prior_seed", ["returns", "pi_entropies"]
     )
     t_sac, sac_data = load_data_from_dir(
-        DIR_SAC, "pure_sac_bs256_seed", ["returns", "pi_entropies", "kl_values"]
+        DIR_SAC, "pure_sac_bs256_seed", ["returns", "pi_entropies"]
     )
 
     # 共通タイムステップ数の調整
@@ -57,11 +59,11 @@ def analyze_and_plot():
     # --- 1. 評価報酬（Returns）の比較プロット ---
     plt.figure(figsize=(10, 6))
     
-    mean_prior = np.mean(returns_prior, axis=0)
-    std_prior = np.std(returns_prior, axis=0)
+    mean_prior = np.nanmean(returns_prior, axis=0)
+    std_prior = np.nanstd(returns_prior, axis=0)
     
-    mean_sac = np.mean(returns_sac, axis=0)
-    std_sac = np.std(returns_sac, axis=0)
+    mean_sac = np.nanmean(returns_sac, axis=0)
+    std_sac = np.nanstd(returns_sac, axis=0)
 
     plt.plot(t, mean_prior, label="Policy-Mean Prior SAC (Ours)", color="#1f77b4", linewidth=2)
     plt.fill_between(t, mean_prior - std_prior, mean_prior + std_prior, color="#1f77b4", alpha=0.2)
@@ -80,13 +82,18 @@ def analyze_and_plot():
 
     # --- 2. エントロピー（Policy Entropy）の比較プロット ---
     plt.figure(figsize=(10, 6))
-    plt.plot(t, np.mean(entropy_prior, axis=0), label="Policy-Mean Prior SAC", color="#1f77b4", linewidth=2)
-    plt.fill_between(t, np.mean(entropy_prior, axis=0) - np.std(entropy_prior, axis=0),
-                     np.mean(entropy_prior, axis=0) + np.std(entropy_prior, axis=0), color="#1f77b4", alpha=0.2)
+    
+    mean_ent_prior = np.nanmean(entropy_prior, axis=0)
+    std_ent_prior = np.nanstd(entropy_prior, axis=0)
+    
+    mean_ent_sac = np.nanmean(entropy_sac, axis=0)
+    std_ent_sac = np.nanstd(entropy_sac, axis=0)
 
-    plt.plot(t, np.mean(entropy_sac, axis=0), label="Vanilla SAC", color="#ff7f0e", linewidth=2)
-    plt.fill_between(t, np.mean(entropy_sac, axis=0) - np.std(entropy_sac, axis=0),
-                     np.mean(entropy_sac, axis=0) + np.std(entropy_sac, axis=0), color="#ff7f0e", alpha=0.2)
+    plt.plot(t, mean_ent_prior, label="Policy-Mean Prior SAC", color="#1f77b4", linewidth=2)
+    plt.fill_between(t, mean_ent_prior - std_ent_prior, mean_ent_prior + std_ent_prior, color="#1f77b4", alpha=0.2)
+
+    plt.plot(t, mean_ent_sac, label="Vanilla SAC", color="#ff7f0e", linewidth=2)
+    plt.fill_between(t, mean_ent_sac - std_ent_sac, mean_ent_sac + std_ent_sac, color="#ff7f0e", alpha=0.2)
 
     plt.title("Humanoid-v5: Policy Entropy Comparison", fontsize=14)
     plt.xlabel("Timesteps", fontsize=12)
@@ -100,12 +107,12 @@ def analyze_and_plot():
     # --- 定量データの統計数値計算 ---
     # AUC（0〜1,000,000ステップの平均報酬エリア）
     idx_1m = np.searchsorted(t, 1_000_000)
-    auc_prior_1m = np.trapz(mean_prior[:idx_1m], t[:idx_1m])
-    auc_sac_1m = np.trapz(mean_sac[:idx_1m], t[:idx_1m])
+    auc_prior_1m = trapezoid(mean_prior[:idx_1m], t[:idx_1m])
+    auc_sac_1m = trapezoid(mean_sac[:idx_1m], t[:idx_1m])
 
     # 平均標準偏差（全体のブローの大きさ）
-    mean_std_prior = np.mean(std_prior)
-    mean_std_sac = np.mean(std_sac)
+    mean_std_prior = np.nanmean(std_prior)
+    mean_std_sac = np.nanmean(std_sac)
 
     # 崩壊（ドロップ）回数のカウント（一度4,000以上に到達した後、3,000未満に落とした回数）
     def count_drops(returns_arr):
@@ -114,10 +121,11 @@ def analyze_and_plot():
             r_seq = returns_arr[seed_idx]
             reached = False
             for r in r_seq:
-                if r >= 4000:
-                    reached = True
-                if reached and r < 3000:
-                    drops += 1
+                if not np.isnan(r):
+                    if r >= 4000:
+                        reached = True
+                    if reached and r < 3000:
+                        drops += 1
         return drops
 
     print("==================================================")
