@@ -1,90 +1,142 @@
+import os
+import glob
 import numpy as np
 import matplotlib.pyplot as plt
 
-# 半チーター用のディレクトリに変更
-SAVE_DIR = "./npz_logs_halfcheetah"
-seed = 0
+# ディレクトリ設定
+DIR_PRIOR = "./npz_logs_policy_mean_prior"
+DIR_SAC = "./npz_logs_pure_sac_bs256"
+SAVE_DIR = "./comparison_results"
+os.makedirs(SAVE_DIR, exist_ok=True)
 
-# ファイル名の定義
-base_prefix = f"{SAVE_DIR}/sac_baseline_seed{seed}"
-gauss_prefix = f"{SAVE_DIR}/gaussian_rho1.0_seed{seed}"
+def load_data_from_dir(directory, prefix, keys):
+    files = sorted(glob.glob(os.path.join(directory, f"{prefix}*.npz")))
+    if not files:
+        raise FileNotFoundError(f"No files found in {directory} with prefix {prefix}")
+    
+    data_dict = {key: [] for key in keys}
+    timesteps = None
 
-# --- 1. データのロード ---
-base_data = np.load(f"{base_prefix}.npz")
-gauss_data = np.load(f"{gauss_prefix}.npz")
+    for f in files:
+        npz = np.load(f)
+        if timesteps is None:
+            timesteps = npz["timesteps"]
+        for key in keys:
+            data_dict[key].append(npz[key])
+            
+    # シード方向にスタック (Shape: [Num_Seeds, Steps])
+    for key in keys:
+        # 長さが異なる場合の安全策（最小長にカット）
+        min_len = min(len(arr) for arr in data_dict[key])
+        data_dict[key] = np.array([arr[:min_len] for arr in data_dict[key]])
+        
+    min_t_len = min(len(arr) for arr in data_dict[keys[0]])
+    timesteps = timesteps[:min_t_len]
+    
+    return timesteps, data_dict
 
-base_ent = np.load(f"{base_prefix}_entropy.npz")
-gauss_ent = np.load(f"{gauss_prefix}_entropy.npz")
+def analyze_and_plot():
+    # データの読み込み
+    t_prior, prior_data = load_data_from_dir(
+        DIR_PRIOR, "policy_mean_prior_seed", ["returns", "pi_entropies", "kl_values"]
+    )
+    t_sac, sac_data = load_data_from_dir(
+        DIR_SAC, "pure_sac_bs256_seed", ["returns", "pi_entropies", "kl_values"]
+    )
 
-base_loss = np.load(f"{base_prefix}_loss.npz")
-gauss_loss = np.load(f"{gauss_prefix}_loss.npz")
+    # 共通タイムステップ数の調整
+    min_steps = min(len(t_prior), len(t_sac))
+    t = t_prior[:min_steps]
+    
+    returns_prior = prior_data["returns"][:, :min_steps]
+    returns_sac = sac_data["returns"][:, :min_steps]
+    
+    entropy_prior = prior_data["pi_entropies"][:, :min_steps]
+    entropy_sac = sac_data["pi_entropies"][:, :min_steps]
 
+    # --- 1. 評価報酬（Returns）の比較プロット ---
+    plt.figure(figsize=(10, 6))
+    
+    mean_prior = np.mean(returns_prior, axis=0)
+    std_prior = np.std(returns_prior, axis=0)
+    
+    mean_sac = np.mean(returns_sac, axis=0)
+    std_sac = np.std(returns_sac, axis=0)
 
-# ==========================================
-# グラフ1: エピソード報酬（リターン）
-# ==========================================
-plt.figure(figsize=(8, 5))
-plt.plot(base_data["timesteps"], base_data["returns"], label="SAC Baseline", color="tab:blue", alpha=0.8)
-plt.plot(gauss_data["timesteps"], gauss_data["returns"], label="Gaussian Prior (rho=1.0)", color="tab:orange", alpha=0.8)
-plt.xlabel("Timesteps", fontsize=12)
-plt.ylabel("Mean Episode Return", fontsize=12)
-plt.title("HalfCheetah-v5: Episode Return Comparison", fontsize=14)
-plt.grid(True)
-plt.legend(fontsize=11)
-plt.tight_layout()
+    plt.plot(t, mean_prior, label="Policy-Mean Prior SAC (Ours)", color="#1f77b4", linewidth=2)
+    plt.fill_between(t, mean_prior - std_prior, mean_prior + std_prior, color="#1f77b4", alpha=0.2)
 
-return_path = f"{SAVE_DIR}/halfcheetah_comparison_return.png"
-plt.savefig(return_path, dpi=300)
-plt.close()
-print(f"📈 1. リターンのグラフを保存しました: {return_path}")
+    plt.plot(t, mean_sac, label="Vanilla SAC", color="#ff7f0e", linewidth=2)
+    plt.fill_between(t, mean_sac - std_sac, mean_sac + std_sac, color="#ff7f0e", alpha=0.2)
 
+    plt.title("Humanoid-v5: Evaluation Returns Comparison (5 Seeds)", fontsize=14)
+    plt.xlabel("Timesteps", fontsize=12)
+    plt.ylabel("Reward", fontsize=12)
+    plt.grid(True, linestyle="--", alpha=0.6)
+    plt.legend(fontsize=12, loc="lower right")
+    plt.tight_layout()
+    plt.savefig(f"{SAVE_DIR}/returns_comparison.png", dpi=300)
+    plt.close()
 
-# ==========================================
-# グラフ2: 方策エントロピー
-# ==========================================
-plt.figure(figsize=(8, 5))
-plt.plot(base_ent["timesteps"], base_ent["entropy"], label="SAC Baseline", color="tab:blue", alpha=0.8)
-plt.plot(gauss_ent["timesteps"], gauss_ent["entropy"], label="Gaussian Prior (rho=1.0)", color="tab:orange", alpha=0.8)
-plt.xlabel("Timesteps", fontsize=12)
-plt.ylabel("Policy Entropy", fontsize=12)
-plt.title("HalfCheetah-v5: Policy Entropy Comparison", fontsize=14)
-plt.grid(True)
-plt.legend(fontsize=11)
-plt.tight_layout()
+    # --- 2. エントロピー（Policy Entropy）の比較プロット ---
+    plt.figure(figsize=(10, 6))
+    plt.plot(t, np.mean(entropy_prior, axis=0), label="Policy-Mean Prior SAC", color="#1f77b4", linewidth=2)
+    plt.fill_between(t, np.mean(entropy_prior, axis=0) - np.std(entropy_prior, axis=0),
+                     np.mean(entropy_prior, axis=0) + np.std(entropy_prior, axis=0), color="#1f77b4", alpha=0.2)
 
-entropy_path = f"{SAVE_DIR}/halfcheetah_comparison_entropy.png"
-plt.savefig(entropy_path, dpi=300)
-plt.close()
-print(f"📈 2. エントロピーのグラフを保存しました: {entropy_path}")
+    plt.plot(t, np.mean(entropy_sac, axis=0), label="Vanilla SAC", color="#ff7f0e", linewidth=2)
+    plt.fill_between(t, np.mean(entropy_sac, axis=0) - np.std(entropy_sac, axis=0),
+                     np.mean(entropy_sac, axis=0) + np.std(entropy_sac, axis=0), color="#ff7f0e", alpha=0.2)
 
+    plt.title("Humanoid-v5: Policy Entropy Comparison", fontsize=14)
+    plt.xlabel("Timesteps", fontsize=12)
+    plt.ylabel("Entropy", fontsize=12)
+    plt.grid(True, linestyle="--", alpha=0.6)
+    plt.legend(fontsize=12)
+    plt.tight_layout()
+    plt.savefig(f"{SAVE_DIR}/entropy_comparison.png", dpi=300)
+    plt.close()
 
-# ==========================================
-# グラフ3: ロス（Actor / Critic の比較）
-# ==========================================
-fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+    # --- 定量データの統計数値計算 ---
+    # AUC（0〜1,000,000ステップの平均報酬エリア）
+    idx_1m = np.searchsorted(t, 1_000_000)
+    auc_prior_1m = np.trapz(mean_prior[:idx_1m], t[:idx_1m])
+    auc_sac_1m = np.trapz(mean_sac[:idx_1m], t[:idx_1m])
 
-# Actor Loss
-axes[0].plot(base_loss["timesteps"], base_loss["actor_loss"], label="SAC Baseline", color="tab:blue", alpha=0.8)
-axes[0].plot(gauss_loss["timesteps"], gauss_loss["actor_loss"], label="Gaussian Prior (rho=1.0)", color="tab:orange", alpha=0.8)
-axes[0].set_xlabel("Timesteps", fontsize=12)
-axes[0].set_ylabel("Actor Loss", fontsize=12)
-axes[0].set_title("Actor Loss Comparison", fontsize=14)
-axes[0].grid(True)
-axes[0].legend(fontsize=11)
+    # 平均標準偏差（全体のブローの大きさ）
+    mean_std_prior = np.mean(std_prior)
+    mean_std_sac = np.mean(std_sac)
 
-# Critic Loss
-axes[1].plot(base_loss["timesteps"], base_loss["critic_loss"], label="SAC Baseline", color="tab:blue", alpha=0.8)
-axes[1].plot(gauss_loss["timesteps"], gauss_loss["critic_loss"], label="Gaussian Prior (rho=1.0)", color="tab:orange", alpha=0.8)
-axes[1].set_xlabel("Timesteps", fontsize=12)
-axes[1].set_ylabel("Critic Loss", fontsize=12)
-axes[1].set_title("Critic Loss Comparison", fontsize=14)
-axes[1].grid(True)
-axes[1].legend(fontsize=11)
+    # 崩壊（ドロップ）回数のカウント（一度4,000以上に到達した後、3,000未満に落とした回数）
+    def count_drops(returns_arr):
+        drops = 0
+        for seed_idx in range(returns_arr.shape[0]):
+            r_seq = returns_arr[seed_idx]
+            reached = False
+            for r in r_seq:
+                if r >= 4000:
+                    reached = True
+                if reached and r < 3000:
+                    drops += 1
+        return drops
 
-plt.tight_layout()
-loss_path = f"{SAVE_DIR}/halfcheetah_comparison_loss.png"
-plt.savefig(loss_path, dpi=300)
-plt.close()
-print(f"📈 3. ロス（Actor/Critic）のグラフを保存しました: {loss_path}")
+    print("==================================================")
+    print("               QUANTITATIVE ANALYSIS              ")
+    print("==================================================")
+    print(f"[1M Steps AUC (Sample Efficiency)]")
+    print(f"  - Policy-Mean Prior : {auc_prior_1m:,.0f}")
+    print(f"  - Vanilla SAC       : {auc_sac_1m:,.0f}")
+    print(f"  - Improvement       : {((auc_prior_1m - auc_sac_1m) / auc_sac_1m) * 100:+.2f}%")
+    print("--------------------------------------------------")
+    print(f"[Mean Standard Deviation (Lower is More Stable)]")
+    print(f"  - Policy-Mean Prior : {mean_std_prior:.2f}")
+    print(f"  - Vanilla SAC       : {mean_std_sac:.2f}")
+    print("--------------------------------------------------")
+    print(f"[Performance Drops (Post-4000 reward < 3000 count)]")
+    print(f"  - Policy-Mean Prior : {count_drops(returns_prior)} times")
+    print(f"  - Vanilla SAC       : {count_drops(returns_sac)} times")
+    print("==================================================")
+    print(f"📁 グラフと解析結果を {SAVE_DIR} に保存しました。")
 
-print("\n✨ 半チーターのすべての個別グラフの生成が完了しました！")
+if __name__ == "__main__":
+    analyze_and_plot()
