@@ -16,6 +16,10 @@
 提案 : kl_values（KL合計）, kl_mean_terms（平均項）, kl_std_terms（σ項）,
        beta_logs（βそのものの値。log ではありません）
 
+★ 現在の __main__ は「試し回し用」になっています
+  （提案手法のみ・seed 0 のみ・100,000 steps）。
+  本実験用の設定は __main__ の末尾にコメントで残してあります。
+
 ★ 実験前にやること（前回の失敗を繰り返さないため）
 ------------------------------------------------------------------
 target_kl の初期値 0.05/次元 は「目安」です。
@@ -127,12 +131,31 @@ def run_experiment(algo_type, seed, total_timesteps=3_000_000, batch_size=64):
 
 
 if __name__ == "__main__":
-    TOTAL_STEPS = 3_000_000
+    # ============================================================
+    # 試し回し用設定（★現在はこちらが有効）
+    # ------------------------------------------------------------
+    # 目的は2つの確認だけです：
+    #   1. kl_values … KL の自然な大きさが target_kl（合計 0.85）と
+    #      かけ離れていないか
+    #   2. beta_logs … β が下限に落ち切らず、生きているか
+    # 提案手法のみ・seed 0 のみ・100,000 steps に絞っています。
+    # 確認が取れたら、このブロックを消して下の本実験用を使ってください。
+    # ============================================================
+    TOTAL_STEPS = 100_000
+    print(f"\n==========================================")
+    print(f" Running (TRIAL): delayed_anchor | Seed: 0 | BS: 64")
+    print(f"==========================================")
+    run_experiment("delayed_anchor", 0, total_timesteps=TOTAL_STEPS, batch_size=64)
 
-    # 提案手法と Vanilla SAC の全5シード（batch_size=64）を一括実行
-    for algo in ["delayed_anchor", "pure_sac"]:
-        for seed in range(5):
-            print(f"\n==========================================")
-            print(f" Running: {algo} | Seed: {seed} | BS: 64")
-            print(f"==========================================")
-            run_experiment(algo, seed, total_timesteps=TOTAL_STEPS, batch_size=64)
+    # ============================================================
+    # 本実験用設定（試し回しの確認が取れたら、上のブロックと入れ替える）
+    # ============================================================
+    # TOTAL_STEPS = 3_000_000
+    #
+    # # 提案手法と Vanilla SAC の全5シード（batch_size=64）を一括実行
+    # for algo in ["delayed_anchor", "pure_sac"]:
+    #     for seed in range(5):
+    #         print(f"\n==========================================")
+    #         print(f" Running: {algo} | Seed: {seed} | BS: 64")
+    #         print(f"==========================================")
+    #         run_experiment(algo, seed, total_timesteps=TOTAL_STEPS, batch_size=64)
