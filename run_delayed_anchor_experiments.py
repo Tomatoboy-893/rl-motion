@@ -13,7 +13,8 @@
 保存されるログ (npz)
 --------------------
 共通 : timesteps, returns, pi_entropies, alpha_logs
-提案 : kl_values（KL合計）, kl_mean_terms（平均項）, kl_std_terms（σ項）,
+提案 : kl_values（KL合計）, kl_raw_values（上限適用前のKL）,
+       kl_mean_terms（平均項）, kl_std_terms（σ項）,
        beta_logs（βそのものの値。log ではありません）
 
 ★ 現在の __main__ は「試し回し用」になっています
@@ -121,6 +122,7 @@ def run_experiment(algo_type, seed, total_timesteps=3_000_000, batch_size=64):
     if algo_type == "delayed_anchor":
         save_dict.update({
             "kl_values": np.array(model.kl_values),
+            "kl_raw_values": np.array(model.kl_raw_values),
             "kl_mean_terms": np.array(model.kl_mean_terms),
             "kl_std_terms": np.array(model.kl_std_terms),
             "beta_logs": np.array(model.beta_logs),
@@ -134,10 +136,13 @@ if __name__ == "__main__":
     # ============================================================
     # 試し回し用設定（★現在はこちらが有効）
     # ------------------------------------------------------------
-    # 目的は2つの確認だけです：
+    # 目的は3つの確認だけです：
     #   1. kl_values … KL の自然な大きさが target_kl（合計 0.85）と
     #      かけ離れていないか
     #   2. beta_logs … β が下限に落ち切らず、生きているか
+    #   3. kl_raw_values … 前回のような KL の爆発（約 9×10^16）が
+    #      出ていないか。上限の防御がどれくらい効いたかは
+    #      kl_values との差で分かります
     # 提案手法のみ・seed 0 のみ・100,000 steps に絞っています。
     # 確認が取れたら、このブロックを消して下の本実験用を使ってください。
     # ============================================================
