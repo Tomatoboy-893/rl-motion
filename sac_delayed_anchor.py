@@ -57,6 +57,20 @@
        （1つの次元だけが全体を爆発させることを防ぎます）。
    上限をかける前の KL は kl_raw_values に別途記録するので、
    「上限がどれくらい頻繁に効いているか」は後から確認できます。
+6. 【ブレーキのウォームアップ（任意・初期設定は無効）】
+   本実験の同シード比較で、遅延アンカー版は序盤の立ち上がりが
+   SAC の約半分の速さになることが分かりました（KL 制約が
+   序盤から常時作動し、急速に伸びる時期まで締めていた可能性）。
+   一方、リターンの崩れが実際に起きるのは中盤以降です。
+   そこで、ブレーキの実効係数に 0→1 の係数（brake factor）を掛け、
+   brake_warmup_start までは 0（ブレーキなし）、
+   brake_warmup_end で 1（フル作動）になるよう段階的に
+   投入できるようにしました。「安全装置は普段は邪魔をせず、
+   危ない時期に作動する」という本来の狙いに合わせる変更です。
+   β 自体の自動調整はウォームアップ中も通常通り行うので、
+   係数が上がり切る頃には β は較正済みになっています。
+   ※ brake_warmup_end=0（初期設定）なら係数は常に 1 で、
+     従来版と完全に同じ動作になります。
 """
 
 import copy
@@ -98,6 +112,10 @@ class SACWithDelayedAnchorPrior(SAC):
     kl_term_cap : float
         平均項・σ項それぞれに対する「1次元あたり」の上限。
         1つの次元の異常値が KL 全体を爆発させるのを防ぎます。
+    brake_warmup_start, brake_warmup_end : int
+        ブレーキのウォームアップ（環境ステップ数）。
+        start まではブレーキ係数 0、end で 1、その間は線形に増加。
+        end=0（初期設定）ならウォームアップなし（係数つねに 1）。
     """
 
     def __init__(
@@ -111,6 +129,8 @@ class SACWithDelayedAnchorPrior(SAC):
         beta_max=10.0,
         anchor_log_std_min=-4.0,
         kl_term_cap=10.0,
+        brake_warmup_start=0,
+        brake_warmup_end=0,
         **kwargs
     ):
         super().__init__(*args, **kwargs)
@@ -145,6 +165,10 @@ class SACWithDelayedAnchorPrior(SAC):
         self.anchor_log_std_min = anchor_log_std_min  # アンカーσの下限
         self.kl_term_cap = kl_term_cap                # 項ごとの上限（次元ごと）
 
+        # --- ブレーキのウォームアップ設定（0 なら無効＝従来動作） ---
+        self.brake_warmup_start = brake_warmup_start
+        self.brake_warmup_end = brake_warmup_end
+
         # --- ログ置き場 ---
         # ※ beta_logs / alpha_logs の中身は log ではなく「値そのもの」です
         self.kl_values = []       # KL（全次元合計、上限適用後＝実際に使う値）
@@ -152,8 +176,26 @@ class SACWithDelayedAnchorPrior(SAC):
         self.kl_mean_terms = []   # KL のうち「平均項」だけの合計（上限適用後）
         self.kl_std_terms = []    # KL のうち「σ項」だけの合計（上限適用後）
         self.beta_logs = []       # β そのものの値
+        self.brake_factors = []   # ブレーキ係数（0〜1、ウォームアップ用）
         self.pi_entropies = []    # 方策エントロピー（tanh 前ガウスの合計）
         self.alpha_logs = []      # α そのものの値
+
+    def _brake_factor(self):
+        """現在のブレーキ係数（0〜1）を返します。
+
+        ウォームアップ未設定（brake_warmup_end <= 0）なら常に 1.0
+        （従来版と同じ動作）。設定時は環境ステップ数に応じて
+        start までは 0、end 以降は 1、その間は線形に増えます。
+        """
+        if self.brake_warmup_end <= 0:
+            return 1.0
+        t = self.num_timesteps
+        if t <= self.brake_warmup_start:
+            return 0.0
+        if t >= self.brake_warmup_end:
+            return 1.0
+        span = self.brake_warmup_end - self.brake_warmup_start
+        return (t - self.brake_warmup_start) / span
 
     @staticmethod
     def kl_diag_gaussians(mu1, log_std1, mu2, log_std2, term_cap=None):
@@ -262,7 +304,13 @@ class SACWithDelayedAnchorPrior(SAC):
             beta = torch.exp(self.log_beta).clamp(1e-12, 1e6)
             alpha = torch.exp(self.log_ent_coef.detach())
 
-            actor_loss = (alpha * log_prob - q_pi + beta * kl.unsqueeze(-1)).mean()
+            # ブレーキの実効の強さ = β × ウォームアップ係数
+            # （係数が 1 のときは従来版と完全に一致します）
+            brake_factor = self._brake_factor()
+            self.brake_factors.append(brake_factor)
+            beta_eff = beta * brake_factor
+
+            actor_loss = (alpha * log_prob - q_pi + beta_eff * kl.unsqueeze(-1)).mean()
 
             self.actor.optimizer.zero_grad()
             actor_loss.backward()
