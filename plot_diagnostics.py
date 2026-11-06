@@ -1,6 +1,9 @@
 import os
 import glob
 import numpy as np
+import matplotlib
+# サーバー環境（GUI非対応）でもエラーにならないようバックエンドを変更
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 def plot_internal_diagnostics(base_dir=".", save_filename="comparison_results/diagnostics_comparison.png"):
@@ -18,14 +21,18 @@ def plot_internal_diagnostics(base_dir=".", save_filename="comparison_results/di
         files = glob.glob(os.path.join(dir_path, f"{algo}_bs64_seed*.npz"))
         data_list = []
         min_len = float("inf")
+        
         for f in sorted(files):
             d = np.load(f)
-            if key in d and len(d[key]) > 0:
-                val = d[key]
+            if key in d and d[key].size > 0:
+                # 平坦化して1次元化
+                val = np.array(d[key]).flatten()
                 data_list.append(val)
                 min_len = min(min_len, len(val))
-        if not data_list:
+                
+        if not data_list or min_len == float("inf"):
             return None, None
+            
         arr = np.array([v[:min_len] for v in data_list])
         return np.mean(arr, axis=0), np.std(arr, axis=0)
 
