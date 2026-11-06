@@ -3,86 +3,85 @@ import glob
 import numpy as np
 import matplotlib.pyplot as plt
 
-LOG_DIR = "./npz_logs_pure_sac_bs256"
-SAVE_PATH = "./pure_sac_all_metrics.png"
 
-files = sorted(glob.glob(os.path.join(LOG_DIR, "*.npz")))
+def plot_evaluation_returns(
+    base_dir=".",
+    algos=["policy_mean_prior", "pure_sac"],
+    labels=["Policy Mean Prior (Proposed)", "Pure SAC"],
+    colors=["#d62728", "#1f77b4"],
+    save_filename="humanoid_v5_returns.png",
+):
+    plt.figure(figsize=(9, 5.5), dpi=300)
+    plt.rcParams["font.sans-serif"] = ["Helvetica", "Arial", "DejaVu Sans"]
 
-if not files:
-    print(f"❌ '{LOG_DIR}' に .npz ファイルが見つかりません。")
-    exit()
+    for algo, label, color in zip(algos, labels, colors):
+        dir_path = os.path.join(base_dir, f"npz_logs_{algo}_bs64")
+        files = glob.glob(os.path.join(dir_path, f"{algo}_bs64_seed*.npz"))
 
-# 1. データの読み込みとキーの動的検出
-sample_npz = np.load(files[0])
-all_keys = list(sample_npz.keys())
+        if not files:
+            print(f"Warning: {dir_path} にファイルが見つかりません。")
+            continue
 
-# X軸（timesteps）と可視化対象の指標キーを分離
-if "timesteps" in all_keys:
-    x_key = "timesteps"
-elif "t" in all_keys:
-    x_key = "t"
-else:
-    x_key = None
+        returns_list = []
+        min_len = float("inf")
+        common_timesteps = None
 
-metric_keys = [k for k in all_keys if k != x_key and np.issubdtype(sample_npz[k].dtype, np.number)]
+        # シードごとのデータを読み込み
+        for f in sorted(files):
+            data = np.load(f)
+            t = data["timesteps"]
+            r = data["returns"]
 
-print(f"🔍 検出された指標: {metric_keys}")
+            returns_list.append(r)
+            if len(r) < min_len:
+                min_len = len(r)
+                common_timesteps = t[:min_len]
 
-# 全シードのデータをロード
-data_by_metric = {k: [] for k in metric_keys}
-timesteps = sample_npz[x_key] if x_key else None
+        # 共通の長さ（ステップ数）に揃えて配列化
+        returns_arr = np.array([r[:min_len] for r in returns_list])
 
-for f in files:
-    data = np.load(f)
-    for k in metric_keys:
-        if k in data:
-            data_by_metric[k].append(data[k])
+        # 平均と標準偏差の計算
+        mean_returns = np.mean(returns_arr, axis=0)
+        std_returns = np.std(returns_arr, axis=0)
 
-# データ長の揃え込み処理
-min_lens = {}
-for k in metric_keys:
-    if data_by_metric[k]:
-        min_lens[k] = min(len(arr) for arr in data_by_metric[k])
-        data_by_metric[k] = np.array([arr[:min_lens[k]] for arr in data_by_metric[k]])
+        # 描画
+        plt.plot(
+            common_timesteps,
+            mean_returns,
+            label=f"{label} (n={len(returns_list)})",
+            color=color,
+            linewidth=2.0,
+        )
+        plt.fill_between(
+            common_timesteps,
+            mean_returns - std_returns,
+            mean_returns + std_returns,
+            color=color,
+            alpha=0.18,
+        )
 
-# 2. グラフ描画（指標数に応じたサブプロット構成）
-num_metrics = len(metric_keys)
-fig, axes = plt.subplots(num_metrics, 1, figsize=(10, 3.5 * num_metrics), sharex=True)
+    # グラフ装飾
+    plt.xlabel("Timesteps", fontsize=12, labelpad=8)
+    plt.ylabel("Evaluation Mean Return", fontsize=12, labelpad=8)
+    plt.title(
+        "Humanoid-v5: Evaluation Performance Comparison (Batch Size = 64)",
+        fontsize=13,
+        pad=12,
+    )
+    plt.grid(True, linestyle="--", alpha=0.5)
+    plt.legend(fontsize=11, loc="lower right", framealpha=0.9)
 
-if num_metrics == 1:
-    axes = [axes]
+    # X軸を「M（Million）」表記にフォーマット
+    ax = plt.gca()
+    ax.xaxis.set_major_formatter(
+        plt.FuncFormatter(lambda x, _: f"{x*1e-6:.1f}M" if x > 0 else "0")
+    )
 
-colors = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b"]
+    plt.tight_layout()
+    plt.savefig(save_filename, bbox_inches="tight")
+    print(f"Saved return plot to {save_filename}")
+    plt.show()
 
-for idx, key in enumerate(metric_keys):
-    ax = axes[idx]
-    arr = data_by_metric[key]  # Shape: (Num_Seeds, Steps)
-    color = colors[idx % len(colors)]
-    
-    # X軸の設定
-    if x_key and timesteps is not None:
-        x_axis = timesteps[:arr.shape[1]]
-    else:
-        x_axis = np.arange(arr.shape[1])
 
-    # 各シードの個別線（薄く表示）
-    for seed_idx in range(arr.shape[0]):
-        ax.plot(x_axis, arr[seed_idx], color=color, alpha=0.25, linewidth=1)
-
-    # 平均値と標準偏差（影）
-    mean_val = np.nanmean(arr, axis=0)
-    std_val = np.nanstd(arr, axis=0)
-
-    ax.plot(x_axis, mean_val, color=color, linewidth=2.5, label=f"Mean {key}")
-    ax.fill_between(x_axis, mean_val - std_val, mean_val + std_val, color=color, alpha=0.15)
-
-    ax.set_title(f"Vanilla SAC: {key}", fontsize=12, fontweight="bold")
-    ax.set_ylabel(key, fontsize=10)
-    ax.grid(True, linestyle="--", alpha=0.6)
-    ax.legend(loc="upper right", fontsize=9)
-
-axes[-1].set_xlabel("Timesteps" if x_key else "Steps / Iterations", fontsize=11)
-
-plt.tight_layout()
-plt.savefig(SAVE_PATH, dpi=300)
-print(f"✅ 全指標の可視化グラフを '{SAVE_PATH}' に保存しました。")
+if __name__ == "__main__":
+    plot_evaluation_returns()
