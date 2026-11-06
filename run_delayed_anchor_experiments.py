@@ -17,9 +17,9 @@
        kl_mean_terms（平均項）, kl_std_terms（σ項）,
        beta_logs（βそのものの値。log ではありません）
 
-★ 現在の __main__ は「試し回し用」になっています
-  （提案手法のみ・seed 0 のみ・100,000 steps）。
-  本実験用の設定は __main__ の末尾にコメントで残してあります。
+★ 現在の __main__ は「本実験用」になっています
+  （両手法・5 seeds・3,000,000 steps）。
+  試し回し用の設定は __main__ の末尾にコメントで残してあります。
 
 ★ 実験前にやること（前回の失敗を繰り返さないため）
 ------------------------------------------------------------------
@@ -134,33 +134,31 @@ def run_experiment(algo_type, seed, total_timesteps=3_000_000, batch_size=64):
 
 if __name__ == "__main__":
     # ============================================================
-    # 試し回し用設定（★現在はこちらが有効）
+    # 本実験用設定（★現在はこちらが有効）
     # ------------------------------------------------------------
-    # 目的は3つの確認だけです：
-    #   1. kl_values … KL の自然な大きさが target_kl（合計 0.85）と
-    #      かけ離れていないか
-    #   2. beta_logs … β が下限に落ち切らず、生きているか
-    #   3. kl_raw_values … 前回のような KL の爆発（約 9×10^16）が
-    #      出ていないか。上限の防御がどれくらい効いたかは
-    #      kl_values との差で分かります
-    # 提案手法のみ・seed 0 のみ・100,000 steps に絞っています。
-    # 確認が取れたら、このブロックを消して下の本実験用を使ってください。
+    # 試し回し（100k steps / seed 0）での確認が取れたので、
+    # 本実験に切り替えました。確認済みの内容：
+    #   - 使用される KL は最大 42.66 まで低下し、爆発は解消
+    #   - 定常 KL ≈ 0.850 で目標（合計 0.85）に一致
+    #   - β は定常で約 0.061、下限への張り付きなし
+    # 提案手法と Vanilla SAC を 5 シードずつ、3,000,000 steps 回します。
+    # （合計10ラン分の時間がかかります）
     # ============================================================
-    TOTAL_STEPS = 100_000
-    print(f"\n==========================================")
-    print(f" Running (TRIAL): delayed_anchor | Seed: 0 | BS: 64")
-    print(f"==========================================")
-    run_experiment("delayed_anchor", 0, total_timesteps=TOTAL_STEPS, batch_size=64)
+    TOTAL_STEPS = 3_000_000
+
+    # 提案手法と Vanilla SAC の全5シード（batch_size=64）を一括実行
+    for algo in ["delayed_anchor", "pure_sac"]:
+        for seed in range(5):
+            print(f"\n==========================================")
+            print(f" Running: {algo} | Seed: {seed} | BS: 64")
+            print(f"==========================================")
+            run_experiment(algo, seed, total_timesteps=TOTAL_STEPS, batch_size=64)
 
     # ============================================================
-    # 本実験用設定（試し回しの確認が取れたら、上のブロックと入れ替える）
+    # 試し回し用設定（確認用に残してあります。通常は使いません）
     # ============================================================
-    # TOTAL_STEPS = 3_000_000
-    #
-    # # 提案手法と Vanilla SAC の全5シード（batch_size=64）を一括実行
-    # for algo in ["delayed_anchor", "pure_sac"]:
-    #     for seed in range(5):
-    #         print(f"\n==========================================")
-    #         print(f" Running: {algo} | Seed: {seed} | BS: 64")
-    #         print(f"==========================================")
-    #         run_experiment(algo, seed, total_timesteps=TOTAL_STEPS, batch_size=64)
+    # TOTAL_STEPS = 100_000
+    # print(f"\n==========================================")
+    # print(f" Running (TRIAL): delayed_anchor | Seed: 0 | BS: 64")
+    # print(f"==========================================")
+    # run_experiment("delayed_anchor", 0, total_timesteps=TOTAL_STEPS, batch_size=64)
