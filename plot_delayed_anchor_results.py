@@ -8,13 +8,19 @@ run_delayed_anchor_experiments.py が保存した npz を読み込んで、
 使い方
 ------
     python plot_delayed_anchor_results.py
-    # → ./plots/ フォルダに PNG が3枚できます
+    # → 提案手法だけを描き、./plots/ フォルダに PNG が3枚できます
 
-    # フォルダを変えたいとき
+    # 素の SAC と比較したいときだけ、フォルダを明示してください
     python plot_delayed_anchor_results.py \
-        --delayed-dir ./npz_logs_delayed_anchor_bs64 \
-        --sac-dir ./npz_logs_pure_sac_bs64 \
-        --out-dir ./plots
+        --sac-dir ./npz_logs_pure_sac_bs64
+
+★ SAC のフォルダは「初期設定では読みません」
+    以前は初期設定で npz_logs_pure_sac_bs64 を自動で読んでいたため、
+    前回の実験の古い SAC ログ（3M steps 分）が今回の図に混ざる
+    トラブルがありました。そのため、比較したいときだけ
+    --sac-dir で明示する方式に変更しています。
+    また、読み込んだファイル名は実行時にすべて表示されるので、
+    意図しないファイルが混ざっていないか、その場で確認できます。
 
 作られる図
 ----------
@@ -94,18 +100,23 @@ def downsample(x, y, max_points=5000):
     return np.asarray(x)[idx], np.asarray(y)[idx]
 
 
-def load_seed_files(log_dir):
+def load_seed_files(log_dir, label=""):
     """フォルダ内の npz を seed 番号つきで読み込む。
 
     戻り値: {seed番号: npzの辞書} 。フォルダが無い・空なら {} を返す。
+    読み込んだファイル名は標準出力に表示します
+    （古い実験のログが混ざっていないか、その場で気づけるようにするため）。
     """
     result = {}
     if not log_dir or not os.path.isdir(log_dir):
+        if log_dir:
+            print(f"[{label}] フォルダが見つかりません: {log_dir}（スキップします）")
         return result
     for path in sorted(glob.glob(os.path.join(log_dir, "*.npz"))):
         m = re.search(r"seed(\d+)", os.path.basename(path))
         seed = int(m.group(1)) if m else len(result)
         result[seed] = dict(np.load(path))
+        print(f"[{label}] 読み込み: {path}")
     return result
 
 
@@ -310,15 +321,17 @@ def main():
     parser = argparse.ArgumentParser(description="遅延アンカー版 ADR の結果をプロットする")
     parser.add_argument("--delayed-dir", default="./npz_logs_delayed_anchor_bs64",
                         help="提案手法の npz フォルダ")
-    parser.add_argument("--sac-dir", default="./npz_logs_pure_sac_bs64",
-                        help="素の SAC の npz フォルダ（無ければ提案手法だけ描く）")
+    parser.add_argument("--sac-dir", default="",
+                        help="素の SAC の npz フォルダ。初期設定では読まない"
+                             "（古い実験のログが混ざるのを防ぐため）。"
+                             "比較したいときだけ指定すること")
     parser.add_argument("--out-dir", default="./plots", help="図の出力先フォルダ")
     parser.add_argument("--smooth", type=int, default=101,
                         help="学習ログの平滑化ウィンドウ（移動平均の点数）")
     args = parser.parse_args()
 
-    delayed = load_seed_files(args.delayed_dir)
-    sac = load_seed_files(args.sac_dir)
+    delayed = load_seed_files(args.delayed_dir, label="delayed_anchor")
+    sac = load_seed_files(args.sac_dir, label="pure_sac")
 
     if not delayed and not sac:
         print("npz が見つかりませんでした。--delayed-dir / --sac-dir のパスを確認してください。")
