@@ -46,6 +46,17 @@
 4. KL は「平均項（行動の平均のズレ）」と「σ項（ばらつきのズレ）」に
    分けて別々に記録します。どちらの力が効いているかを
    後から切り分けられるようにするためです。
+5. 【試し回しで実際に起きた KL 爆発への対策】
+   100k steps の試し回しで、開始直後に KL が約 9×10^16 まで
+   爆発しました。原因は、一部の状態・次元でアンカー側の σ が
+   ほぼ 0 になり、平均項 (Δμ)^2 / (2 σ_anchor^2) の「分母」が
+   ほぼ 0 の割り算になったことです。対策は2段構えです。
+   (a) アンカー側 log_std の下限を -20 から -4 へ引き上げる
+       （σ の下限が約 0.018 になり、分母が潰れなくなります）。
+   (b) 平均項・σ項に「次元ごと」の上限 kl_term_cap を設ける
+       （1つの次元だけが全体を爆発させることを防ぎます）。
+   上限をかける前の KL は kl_raw_values に別途記録するので、
+   「上限がどれくらい頻繁に効いているか」は後から確認できます。
 """
 
 import copy
@@ -80,6 +91,13 @@ class SACWithDelayedAnchorPrior(SAC):
     beta_min, beta_max : float
         β の下限・上限。log β をこの範囲に対応する値へクランプし、
         β が 0 に落ち切って装置が消えるのを防ぎます。
+    anchor_log_std_min : float
+        アンカー側 log_std の下限。π 側の慣習（-20）のままだと
+        KL の分母 σ_anchor^2 がほぼ 0 になり、平均項が爆発します
+        （試し回しで実測）。-4（σ≈0.018）まで引き上げます。
+    kl_term_cap : float
+        平均項・σ項それぞれに対する「1次元あたり」の上限。
+        1つの次元の異常値が KL 全体を爆発させるのを防ぎます。
     """
 
     def __init__(
@@ -91,6 +109,8 @@ class SACWithDelayedAnchorPrior(SAC):
         anchor_tau=0.005,
         beta_min=1e-4,
         beta_max=10.0,
+        anchor_log_std_min=-4.0,
+        kl_term_cap=10.0,
         **kwargs
     ):
         super().__init__(*args, **kwargs)
@@ -121,20 +141,25 @@ class SACWithDelayedAnchorPrior(SAC):
         self.log_beta_min = math.log(beta_min)
         self.log_beta_max = math.log(beta_max)
 
+        # --- KL 爆発への2つの防御（試し回しの反省） ---
+        self.anchor_log_std_min = anchor_log_std_min  # アンカーσの下限
+        self.kl_term_cap = kl_term_cap                # 項ごとの上限（次元ごと）
+
         # --- ログ置き場 ---
         # ※ beta_logs / alpha_logs の中身は log ではなく「値そのもの」です
-        self.kl_values = []       # KL（全次元合計）の実測値
-        self.kl_mean_terms = []   # KL のうち「平均項」だけの合計
-        self.kl_std_terms = []    # KL のうち「σ項」だけの合計
+        self.kl_values = []       # KL（全次元合計、上限適用後＝実際に使う値）
+        self.kl_raw_values = []   # KL（上限適用前。σの下限だけは適用済み）
+        self.kl_mean_terms = []   # KL のうち「平均項」だけの合計（上限適用後）
+        self.kl_std_terms = []    # KL のうち「σ項」だけの合計（上限適用後）
         self.beta_logs = []       # β そのものの値
         self.pi_entropies = []    # 方策エントロピー（tanh 前ガウスの合計）
         self.alpha_logs = []      # α そのものの値
 
     @staticmethod
-    def kl_diag_gaussians(mu1, log_std1, mu2, log_std2):
+    def kl_diag_gaussians(mu1, log_std1, mu2, log_std2, term_cap=None):
         """2つの対角ガウス分布の KL(π1 || π2) を計算し、内訳も返します。
 
-        戻り値は (KL合計, 平均項の合計, σ項の合計) で、
+        戻り値は (KL合計, 平均項の合計, σ項の合計, 上限適用前のKL合計) で、
         いずれも行動次元方向に合計済み・サンプルごとの形 [batch] です。
 
         - 平均項: (μ1 - μ2)^2 / (2 σ2^2)
@@ -142,6 +167,13 @@ class SACWithDelayedAnchorPrior(SAC):
           今のポリシーをお手本にした従来版では、ここが常に 0 でした。
         - σ項: log(σ2/σ1) + σ1^2 / (2 σ2^2) - 1/2
           「ばらつきの大きさのズレ」を表します。
+
+        term_cap が指定された場合、平均項・σ項のそれぞれに
+        「次元ごと」の上限をかけてから合計します。1つの次元で
+        σ2 が極小になるなどして項が異常に大きくなっても、
+        KL 全体が爆発しないようにするための防御です。
+        （上限適用前の値も4番目に返すので、防御が効いたかどうかは
+        ログで追跡できます。）
         """
         var1 = torch.exp(2 * log_std1)
         var2 = torch.exp(2 * log_std2)
@@ -149,8 +181,15 @@ class SACWithDelayedAnchorPrior(SAC):
         mean_term = (mu1 - mu2) ** 2 / (2.0 * var2)
         std_term = log_std2 - log_std1 + var1 / (2.0 * var2) - 0.5
 
+        # 上限をかける前の合計（監視用）
+        kl_raw = (mean_term + std_term).sum(dim=-1)
+
+        if term_cap is not None:
+            mean_term = torch.clamp(mean_term, max=term_cap)
+            std_term = torch.clamp(std_term, max=term_cap)
+
         kl = mean_term + std_term
-        return kl.sum(dim=-1), mean_term.sum(dim=-1), std_term.sum(dim=-1)
+        return kl.sum(dim=-1), mean_term.sum(dim=-1), std_term.sum(dim=-1), kl_raw
 
     def train(self, gradient_steps: int, batch_size: int = 64):
         self.policy.set_training_mode(True)
@@ -190,7 +229,12 @@ class SACWithDelayedAnchorPrior(SAC):
                 anchor_mean, anchor_log_std, _ = (
                     self.anchor_actor.get_action_dist_params(obs)
                 )
-                anchor_log_std = torch.clamp(anchor_log_std, -20.0, 2.0)
+                # ★ 下限は π 側（-20）と別にします。アンカーの σ は
+                #   KL の「分母」に入るので、ほぼ 0 になると平均項が
+                #   爆発します（試し回しで約 9×10^16 を実測）。
+                anchor_log_std = torch.clamp(
+                    anchor_log_std, self.anchor_log_std_min, 2.0
+                )
 
             # エントロピーの記録（従来コードと同じ定義）
             pi_dist = Normal(pi_mean, torch.exp(pi_log_std))
@@ -198,11 +242,15 @@ class SACWithDelayedAnchorPrior(SAC):
             self.pi_entropies.append(float(entropy.detach().cpu()))
 
             # 3. KL(π || アンカー) の計算と記録（平均項／σ項に分けて残す）
-            kl, kl_mean_part, kl_std_part = self.kl_diag_gaussians(
-                pi_mean, pi_log_std, anchor_mean, anchor_log_std
+            #    損失と β の調整に使うのは「上限適用後」の KL です。
+            #    上限適用前の KL も別に記録し、防御が効いた頻度を追います。
+            kl, kl_mean_part, kl_std_part, kl_raw = self.kl_diag_gaussians(
+                pi_mean, pi_log_std, anchor_mean, anchor_log_std,
+                term_cap=self.kl_term_cap,
             )
             kl_mean = kl.mean()
             self.kl_values.append(float(kl_mean.detach().cpu()))
+            self.kl_raw_values.append(float(kl_raw.mean().detach().cpu()))
             self.kl_mean_terms.append(float(kl_mean_part.mean().detach().cpu()))
             self.kl_std_terms.append(float(kl_std_part.mean().detach().cpu()))
 
