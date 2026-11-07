@@ -1,0 +1,9 @@
+__pycache__/
+*.py[cod]
+npz_logs*/
+plots/
+videos_*/
+*.npz
+*.log
+*.zip
+.DS_Store
