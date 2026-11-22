@@ -31,6 +31,11 @@
   注意: 遅延アンカー seed 1 (崩壊) でも KL は目標通り・beta 生存だった。
   したがって「beta生存」は「崩壊していない」ことの証明にはならない。
   逆に「beta死 + KL が目標を大きく下回る」は H1 の強い証拠になる。
+- α (alpha_logs) も区間ごとに集計する (2026-11-21 追加。アクター側の最後の
+  未確認量)。alpha_logs に入っているのは log α ではなく α そのもの
+  (2026-11-07 に sac_models.py で確認)。α の正常範囲に固定のしきい値は
+  設けない。α がほぼ 0 に張り付く、桁違いに跳ねるといった極端な動きだけを
+  アクター温度の異常の目安とし、ふつうは健全シードとの並べ比べで読む。
 """
 
 import argparse
@@ -81,6 +86,7 @@ def main():
     kl, kl_raw = get("kl_values"), get("kl_raw_values")
     kl_mean, kl_std = get("kl_mean_terms"), get("kl_std_terms")
     beta, ent = get("beta_logs"), get("pi_entropies")
+    alpha = get("alpha_logs")
     returns, steps = get("returns"), get("timesteps")
 
     if kl is None and kl_raw is None and beta is None:
@@ -88,7 +94,7 @@ def main():
               "エントロピーとリターンだけを表示します。")
 
     header = (f"{'区間':>10} | {'return':>9} | {'KL':>7} | {'KL_raw':>7} | "
-              f"{'KL平均項':>8} | {'KLσ項':>7} | {'beta':>7} | {'entropy':>7}")
+              f"{'KL平均項':>8} | {'KLσ項':>7} | {'beta':>7} | {'entropy':>7} | {'alpha':>7}")
     print(header)
     print("-" * len(header))
     late = {}
@@ -100,12 +106,12 @@ def main():
         else:
             row["ret"] = float("nan")
         for key, arr in [("kl", kl), ("raw", kl_raw), ("m", kl_mean),
-                         ("s", kl_std), ("b", beta), ("e", ent)]:
+                         ("s", kl_std), ("b", beta), ("e", ent), ("a", alpha)]:
             row[key] = mean_or_nan(arr[window_slice(len(arr), lo, hi)]) if arr is not None else float("nan")
         if name == "2-3M":
             late = row
         print(f"{name:>10} | {row['ret']:9.0f} | {row['kl']:7.3f} | {row['raw']:7.3f} | "
-              f"{row['m']:8.3f} | {row['s']:7.3f} | {row['b']:7.4f} | {row['e']:7.3f}")
+              f"{row['m']:8.3f} | {row['s']:7.3f} | {row['b']:7.4f} | {row['e']:7.3f} | {row['a']:7.4f}")
 
     print()
     print("--- 判定 (2M-3M 区間の平均) ---")
@@ -115,6 +121,13 @@ def main():
           f"エントロピー平均 {late.get('e', float('nan')):.2f}")
     print(f"KL 平均項 {late.get('m', float('nan')):.3f} / KL σ項 {late.get('s', float('nan')):.3f} "
           f"(平均項の割合 {late.get('m', 0) / max(late.get('kl', 1), 1e-9) * 100:.0f}%)")
+    a = late.get("a", float("nan"))
+    if np.isnan(a):
+        print("α 平均 nan (alpha_logs がありません)。")
+    else:
+        print(f"α 平均 {a:.4f} (アクターの温度。固定のしきい値はなし。"
+              "ほぼ 0 に張り付く／桁違いに跳ねる場合のみ異常の目安で、"
+              "ふつうは健全シードとの並べ比べで読むこと)")
     b, k = late.get("b", float("nan")), late.get("kl", float("nan"))
     if np.isnan(b) or np.isnan(k):
         print("判定: beta/KL の記録がないため判定できません。")
