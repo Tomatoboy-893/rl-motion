@@ -14,7 +14,8 @@
 対象（計画書「今後の流れ_2026-11-18.md」フェーズ3 ステップ2、2026-11-22 統一版）
 ------------------------------------------------------------------
 - 第1陣: seed 8 ペア（SAC seed 8 と先輩版 seed 8。初期σがほぼ同一で
-  両方とも這い型に崩壊した組）＋対照の SAC seed 7（健全）
+  両方とも這い型に崩壊した組）＋ seed 7 ペア（SAC seed 7 と先輩版 seed 7。
+  両方とも健全な組で、各手法の正常なクリティックの見本）
 - 尺度: 分岐は 500k までにほぼ決まるため 500k〜1M steps。
   既定は 1,000,000 steps（1本あたり約1.5〜3時間の見込み）。
   --total-steps で変更できる。
@@ -100,7 +101,7 @@ python3 run_critic_probe_halfcheetah.py --algo pure_sac --seed 8 --smoke
 # 本番1本（既定 1M steps）
 python3 run_critic_probe_halfcheetah.py --algo pure_sac --seed 8
 
-# 計画の3本を順に（SAC seed 8 → SAC seed 7 → 先輩版 seed 8）
+# 計画の4本を順に（SAC seed 8 → SAC seed 7 → 先輩版 seed 8 → 先輩版 seed 7）
 python3 run_critic_probe_halfcheetah.py --plan
 
 # 500k だけ、などの指定
@@ -538,9 +539,10 @@ def run_experiment(algo_type, seed, total_timesteps=1_000_000, batch_size=256,
 
 # 計画の3本（主軸2本＋必要に応じて1本）
 PLAN = [
-    ("pure_sac", 8),      # 這い型で確定（観察の主軸）
-    ("pure_sac", 7),      # 健全（対比の主軸）
-    ("fixed_prior", 8),   # 先輩版の崩壊（必要に応じて）
+    ("pure_sac", 8),      # 這い型で確定（崩壊ペア）
+    ("pure_sac", 7),      # 健全（健全ペア）
+    ("fixed_prior", 8),   # 先輩版の崩壊（崩壊ペア）
+    ("fixed_prior", 7),   # 先輩版の健全（健全ペア）
 ]
 
 
