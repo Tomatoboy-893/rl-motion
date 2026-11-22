@@ -11,10 +11,16 @@ keisanB のリポジトリ直下で実行する想定:
 
 出力 (./plots_10seed/ 以下):
     summary_per_seed.csv   シード別の最終区間平均・AUC・崩壊フラグ
+    distribution_per_seed.csv シード別のエントロピー・α (先輩版は KL・β も) の区間平均
     fig_curves_by_seed.png 手法ごとに10シード全曲線 + 平均
     fig_mean_curves.png    両手法の平均曲線 (mean ± std の帯)
     fig_final_window.png   シード別 最終区間平均の棒グラフ
+    fig_distribution_curves.png エントロピーと α の全シード曲線 (手法ごと)
 標準出力にも集計表を出すので、結果は貼り付けでも共有できる。
+
+分布側の区間集計 (ステップ0) は diagnose_collapse_seed.py と同じ区切り
+(0-100k / 100-500k / 500k-1M / 1-2M / 2-3M) と同じ割り振り方 (系列の
+位置を steps に線形換算) を使うので、個別診断の数字とそのまま比べられる。
 
 定義:
     最終区間 = 2.5M〜3.0M steps の評価点 (101点)
@@ -80,6 +86,53 @@ def load_arm(pattern):
             continue
         out[s] = (ts, rw)
     return out
+
+
+WINDOWS = [
+    ("0-100k", 0, 100_000),
+    ("100-500k", 100_000, 500_000),
+    ("500k-1M", 500_000, 1_000_000),
+    ("1-2M", 1_000_000, 2_000_000),
+    ("2-3M", 2_000_000, 3_000_000),
+]
+DIST_KEYS = ["pi_entropies", "alpha_logs", "kl_values", "beta_logs"]
+
+
+def window_slice(n, lo, hi, total_steps=3_000_000):
+    """diagnose_collapse_seed.py と同じ割り振り: 系列の位置を steps に線形換算。"""
+    i0 = int(round(lo / total_steps * n))
+    i1 = int(round(hi / total_steps * n))
+    return slice(max(0, i0), min(n, i1))
+
+
+def window_means(arr):
+    if arr is None or len(arr) == 0:
+        return [float("nan")] * len(WINDOWS)
+    return [float(np.nanmean(arr[window_slice(len(arr), lo, hi)]))
+            for _, lo, hi in WINDOWS]
+
+
+def load_series(pattern):
+    """{seed: {key: array}} を返す (分布側の系列。無いキーは欠けたまま)。"""
+    out = {}
+    for s in SEEDS:
+        path = pattern.format(s)
+        if not os.path.exists(path):
+            continue
+        try:
+            d = np.load(path)
+        except Exception as e:  # noqa: BLE001
+            print(f"[warn] failed to load {path}: {e}")
+            continue
+        out[s] = {k: np.asarray(d[k], dtype=float) for k in DIST_KEYS if k in d.files}
+    return out
+
+
+def downsample(arr, blocks=300):
+    if arr is None or len(arr) == 0:
+        return np.full(blocks, np.nan)
+    chunks = np.array_split(np.asarray(arr, dtype=float), blocks)
+    return np.array([float(np.nanmean(c)) if len(c) else np.nan for c in chunks])
 
 
 def seed_stats(ts, rw):
@@ -212,7 +265,83 @@ def main():
     fig.savefig(os.path.join(OUTDIR, "fig_final_window.png"), dpi=200)
     plt.close(fig)
 
-    print(f"\nSaved: {csv_path} and 3 figures in {OUTDIR}/")
+    # ---- 分布側の集計 (ステップ0): エントロピー・α (先輩版は KL・β も) ----
+    series = {name: load_series(pat) for name, pat in ARMS.items()}
+    dist = {}  # dist[algo][seed][key] = 区間平均のリスト
+    for name in ARMS:
+        dist[name] = {}
+        for s, dd in series[name].items():
+            dist[name][s] = {k: window_means(dd.get(k)) for k in DIST_KEYS}
+
+    dist_csv = os.path.join(OUTDIR, "distribution_per_seed.csv")
+    win_names = [w[0] for w in WINDOWS]
+    with open(dist_csv, "w") as f:
+        cols = ["algo", "seed", "collapsed"]
+        for key, short in [("pi_entropies", "ent"), ("alpha_logs", "alpha"),
+                           ("kl_values", "kl"), ("beta_logs", "beta")]:
+            cols += [f"{short}_{w}" for w in win_names]
+        f.write(",".join(cols) + "\n")
+        for name in ARMS:
+            for s in sorted(dist[name]):
+                row = [name, str(s), str(int(stats[name][s]["collapsed"]))]
+                for key in DIST_KEYS:
+                    row += [f"{v:.4f}" for v in dist[name][s][key]]
+                f.write(",".join(row) + "\n")
+
+    print("\n=== Distribution (final window 2-3M means) ===")
+    for name in ARMS:
+        for group, sel in [("collapsed", True), ("healthy", False)]:
+            seeds_g = [s for s in sorted(dist[name])
+                       if stats[name][s]["collapsed"] == sel]
+            if not seeds_g:
+                continue
+            ent = np.array([dist[name][s]["pi_entropies"][-1] for s in seeds_g])
+            alp = np.array([dist[name][s]["alpha_logs"][-1] for s in seeds_g])
+            line = (f"{name} {group:>9} (n={len(seeds_g)}): "
+                    f"entropy = {np.nanmean(ent):.2f} ± {np.nanstd(ent):.2f}, "
+                    f"alpha = {np.nanmean(alp):.4f} ± {np.nanstd(alp):.4f}")
+            if name == "ADR":
+                kl = np.array([dist[name][s]["kl_values"][-1] for s in seeds_g])
+                be = np.array([dist[name][s]["beta_logs"][-1] for s in seeds_g])
+                line += (f", KL = {np.nanmean(kl):.3f} ± {np.nanstd(kl):.3f}, "
+                         f"beta = {np.nanmean(be):.4f} ± {np.nanstd(be):.4f}")
+            print(line)
+    print("(per-seed window means: distribution_per_seed.csv)")
+
+    # ---- 図4: エントロピーと α の全シード曲線 ----
+    fig, axes = plt.subplots(2, 2, figsize=(11, 7), sharex=True)
+    xgrid = np.linspace(0, 3.0, 300)
+    for col, (name, color) in enumerate([("SAC", "#4C72B0"), ("ADR", "#DD8452")]):
+        for row, (key, ylabel) in enumerate(
+                [("pi_entropies", "Policy entropy"), ("alpha_logs", "alpha")]):
+            ax = axes[row][col]
+            healthy_curves, collapsed_curves = [], []
+            for s in sorted(series[name]):
+                if key not in series[name][s]:
+                    continue
+                curve = downsample(series[name][s][key])
+                is_col = stats[name][s]["collapsed"]
+                ax.plot(xgrid, curve, lw=0.8,
+                        color="crimson" if is_col else color,
+                        alpha=0.35 if is_col else 0.55)
+                (collapsed_curves if is_col else healthy_curves).append(curve)
+            for curves, lab, c in [(healthy_curves, "healthy mean", color),
+                                   (collapsed_curves, "collapsed mean", "crimson")]:
+                if curves:
+                    ax.plot(xgrid, np.nanmean(np.array(curves), axis=0),
+                            lw=2.2, color=c, label=lab)
+            ax.set_title(f"{name}: {ylabel}" if row == 0 else f"{name}")
+            ax.set_ylabel(ylabel)
+            ax.grid(alpha=0.3)
+            ax.legend(fontsize=8)
+            if row == 1:
+                ax.set_xlabel("Steps (M)")
+    fig.suptitle("Entropy and alpha trajectories by seed (red = collapsed seeds)")
+    fig.tight_layout()
+    fig.savefig(os.path.join(OUTDIR, "fig_distribution_curves.png"), dpi=200)
+    plt.close(fig)
+
+    print(f"\nSaved: {csv_path}, {dist_csv} and 4 figures in {OUTDIR}/")
     return 0
 
 
