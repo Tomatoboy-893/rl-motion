@@ -50,10 +50,13 @@
 - actor リセットは方策ネットワークの重みだけが対象。α（SAC の
   エントロピー温度）と、先輩版の β はスカラーの調整量であり、
   ネットワークではないので保持する。
-- critic / actor リセットでは、対象パラメータについて共有
-  オプティマイザ（SB3 の SAC は方策全体で1つの Adam）の蓄積状態を
-  消す（ベストエフォート。内部構造が想定と違えば警告だけ出して
-  重みの初期化のみで進む）。
+- critic / actor リセットでは、対象モジュールに付いたオプティ
+  マイザ（この SB3 ではアクターとクリティックに別々の Adam）の
+  蓄積状態を、対象パラメータについて消す（ベストエフォート。
+  内部構造が想定と違えば警告だけ出して重みの初期化のみで進む）。
+  ※初版は「方策全体で1つの共有 Adam」と想定して model.policy.
+  optimizer を見に行き、試し回しで属性が無いことが判明したため、
+  モジュール直付けの optimizer を見るよう修正した（2026-11-23）。
 - 重みの初期化は各 Linear 層の reset_parameters() で行う
   （新規構築時と同じ分布からの初期化）。
 
@@ -247,14 +250,21 @@ def _print_branch_state(model, algo_type, label):
 
 
 def _clear_optimizer_state_for(module, model):
-    """共有オプティマイザの蓄積状態のうち、対象モジュールの分だけ消す。
+    """対象モジュールのオプティマイザの蓄積状態のうち、そのモジュールの
+    パラメータ分だけを消す。
 
-    SB3 の SAC は方策全体で1つの Adam を共有するため、リセットした
-    パラメータのモーメントだけを落とす。内部構造が想定と違えば
-    警告だけ出して続行する（重みの初期化が介入の本体）。
+    この SB3 ではオプティマイザはアクター／クリティックの各モジュールに
+    直付けされている（model.policy.optimizer は無い。2026-11-23 の
+    試し回しで確認）。念のため方策側の optimizer もフォールバックで見る。
+    内部構造が想定と違えば警告だけ出して続行する（重みの初期化が
+    介入の本体）。
     """
     try:
-        optimizer = model.policy.optimizer
+        optimizer = getattr(module, "optimizer", None)
+        if optimizer is None:
+            optimizer = getattr(model.policy, "optimizer", None)
+        if optimizer is None:
+            raise AttributeError("対象モジュールの optimizer が見つかりません")
         params = list(module.parameters())
         removed = 0
         for p in params:
