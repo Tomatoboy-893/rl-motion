@@ -76,6 +76,13 @@
 
 正直な留保
 ----------
+- 2026-11-24 の本番で、先輩版の第2段1本目（control）の読み込みが
+  TypeError で落ち、バッチが止まった。原因は SACWithFixedPrior の
+  必須引数（beta_kl 等）を SB3 の load が渡さないこと。load に
+  構築時と同じ値を明示して渡すよう修正し、試し回しにも先輩版の
+  読み込みを含めた。SAC 側の第2段4本は修正前に完走済みで、
+  先輩版の第1段（500k 状態）も保存済みのため、再開は先輩版の
+  第2段4本だけでよい。
 - SB3 の保存・読み込みでは、一部の最適化器の状態（先輩版の
   β 用オプティマイザなど、モデル直付けのもの）は保存されない
   ことがある。これは全条件に共通で、control 条件がその影響を
@@ -381,7 +388,15 @@ def intervene(algo_type, seed, condition, state_steps=500_000,
     eval_env.reset(seed=seed + 1000)
 
     model_cls = _model_class(algo_type)
-    model = model_cls.load(zip_path, env=train_env)
+    # 先輩版 SACWithFixedPrior は beta_kl / beta_lr / target_kl / prior_std が
+    # 必須の引数（デフォルトなし）で、SB3 の load は保存データから再構築する
+    # ときにこれらを渡さないため TypeError になる（2026-11-24 の本番で判明）。
+    # 構築時と同じ値を明示して渡す。保存済みの log_beta 等が読み込み後に
+    # 復元されることは、分岐点の表示（β の値）で確認する。
+    load_kwargs = {}
+    if algo_type == "fixed_prior":
+        load_kwargs = dict(beta_kl=0.01, beta_lr=1e-3, target_kl=1.0, prior_std=2.0)
+    model = model_cls.load(zip_path, env=train_env, **load_kwargs)
     if condition != "buffer":
         model.load_replay_buffer(buffer_path)
     _print_branch_state(model, algo_type, f"読み込み直後（適用前, {condition}）")
@@ -438,6 +453,13 @@ def run_smoke():
     for condition in CONDITIONS:
         intervene("pure_sac", 8, condition, state_steps=10_000,
                   continue_steps=2_000, probe_every=1000, tag="_smoke")
+    # 先輩版は load の経路が SAC と違う（必須の引数がある）ため、状態保存と
+    # 読み込み（control だけ）も試し回しに含める（2026-11-24 追加。
+    # 初版の試し回しは SAC のみで、本番の先輩版1本目で落ちた反省から）
+    print("=== STEP3 SMOKE (fixed_prior seed 8: 10k state -> control x 2k) ===")
+    make_state("fixed_prior", 8, state_steps=10_000, probe_every=1000, tag="_smoke")
+    intervene("fixed_prior", 8, "control", state_steps=10_000,
+              continue_steps=2_000, probe_every=1000, tag="_smoke")
     print("=== SMOKE DONE ===")
 
 
