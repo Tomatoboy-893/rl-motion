@@ -78,11 +78,13 @@
 ----------
 - 2026-11-24 の本番で、先輩版の第2段1本目（control）の読み込みが
   TypeError で落ち、バッチが止まった。原因は SACWithFixedPrior の
-  必須引数（beta_kl 等）を SB3 の load が渡さないこと。load に
-  構築時と同じ値を明示して渡すよう修正し、試し回しにも先輩版の
-  読み込みを含めた。SAC 側の第2段4本は修正前に完走済みで、
-  先輩版の第1段（500k 状態）も保存済みのため、再開は先輩版の
-  第2段4本だけでよい。
+  必須引数（beta_kl 等）を SB3 の load が再構築時に渡さないこと。
+  load への追加引数の明示渡しは効かなかった（SB3 はそれを
+  コンストラクタではなく __dict__ の更新に使う）ため、4つの設定に
+  初期値を持たせた読み込み専用サブクラス経由に切り替えた。
+  試し回しにも先輩版の読み込みを含めた。SAC 側の第2段4本は
+  修正前に完走済みで、先輩版の第1段（500k 状態）も保存済みの
+  ため、再開は先輩版の第2段4本だけでよい。
 - SB3 の保存・読み込みでは、一部の最適化器の状態（先輩版の
   β 用オプティマイザなど、モデル直付けのもの）は保存されない
   ことがある。これは全条件に共通で、control 条件がその影響を
@@ -388,15 +390,26 @@ def intervene(algo_type, seed, condition, state_steps=500_000,
     eval_env.reset(seed=seed + 1000)
 
     model_cls = _model_class(algo_type)
-    # 先輩版 SACWithFixedPrior は beta_kl / beta_lr / target_kl / prior_std が
-    # 必須の引数（デフォルトなし）で、SB3 の load は保存データから再構築する
-    # ときにこれらを渡さないため TypeError になる（2026-11-24 の本番で判明）。
-    # 構築時と同じ値を明示して渡す。保存済みの log_beta 等が読み込み後に
-    # 復元されることは、分岐点の表示（β の値）で確認する。
-    load_kwargs = {}
     if algo_type == "fixed_prior":
-        load_kwargs = dict(beta_kl=0.01, beta_lr=1e-3, target_kl=1.0, prior_std=2.0)
-    model = model_cls.load(zip_path, env=train_env, **load_kwargs)
+        # 先輩版 SACWithFixedPrior は beta_kl / beta_lr / target_kl / prior_std
+        # が必須の引数（デフォルトなし）で、SB3 の load は再構築のときに
+        # これらを渡さないため TypeError になる（2026-11-24 の本番で判明）。
+        # load に追加引数を渡しても、それはコンストラクタではなく読み込み
+        # 後の __dict__ 更新に使われるだけなので効かない（同日の試し回しで
+        # 確認）。そこで、4つの設定に構築時と同じ初期値を持たせた読み込み
+        # 専用のサブクラス経由で読み込む。先輩版クラス自体は無変更で、
+        # 保存済みの重みと log_beta は SB3 の load が復元する。復元が
+        # 正しいかは分岐点の表示（β の値）で確認する。
+        class _LoadableFixedPrior(SACWithFixedPrior):
+            def __init__(self, *args, beta_kl=0.01, beta_lr=1e-3,
+                         target_kl=1.0, prior_std=2.0, **kwargs):
+                super().__init__(*args, beta_kl=beta_kl, beta_lr=beta_lr,
+                                 target_kl=target_kl, prior_std=prior_std,
+                                 **kwargs)
+
+        model = _LoadableFixedPrior.load(zip_path, env=train_env)
+    else:
+        model = model_cls.load(zip_path, env=train_env)
     if condition != "buffer":
         model.load_replay_buffer(buffer_path)
     _print_branch_state(model, algo_type, f"読み込み直後（適用前, {condition}）")
