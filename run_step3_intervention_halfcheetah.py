@@ -45,6 +45,17 @@
 - actor   : アクター（方策ネットワーク）だけを初期化し直す。
             クリティックとバッファは保持。
 
+追加条件（2026-11-24、ステップ3の単独4条件の結果を受けて追加。
+設計メモ: ステップ3追加_組み合わせリセット設計_2026-11-24.md）
+------------------------------------------------------------------------
+- critic_buffer : クリティックの初期化とバッファの空からの開始を
+            同時に行う。単独では残りの部品が罠の形を教え直す、と
+            いう説明を検証するための組み合わせ。アクター（方策）と
+            α・β は保持し、第1段の 500k 状態は作り直さず同じ保存
+            状態から分岐する。--plan の4条件には含めない
+            （--intervene --condition critic_buffer か
+            --plan-combined で回す）。
+
 単一変数の線引き（先に固定）
 ----------------------------
 - actor リセットは方策ネットワークの重みだけが対象。α（SAC の
@@ -66,6 +77,11 @@
 - buffer で救済 → データの循環
 - actor で救済 → 方策側の固着
 - どれでも救済されない → 局所最適の読みが強まる
+- critic_buffer（追加条件）で救済 → 価値とデータの結びつきが罠を
+  維持していた。単独では残りの部品が罠の形を教え直していた、と読む。
+  これでも救済されなければ、介入はここで止めて「単独でも組み合わせ
+  でも抜けられない自己一貫した局所最適」で確定し、フェーズ4と執筆へ
+  移る（2026-11-24 の方針。設計メモ参照）。
 - SAC と先輩版で結果が違えば、ADR のカバー範囲の材料になる
 
 判定基準（実行前に固定）
@@ -120,6 +136,10 @@ python3 run_step3_intervention_halfcheetah.py --intervene --algo pure_sac --seed
 # 全部を順に（第1段2本＋第2段8本。約2日の見込み）
 python3 run_step3_intervention_halfcheetah.py --plan
 
+# 組み合わせリセットだけ（第1段の作り直しは不要。2本で約3時間）
+python3 run_step3_intervention_halfcheetah.py --plan-combined
+python3 run_step3_intervention_halfcheetah.py --intervene --algo pure_sac --seed 8 --condition critic_buffer
+
 出力
 ----
 保存先は ./npz_logs_step3_halfcheetah/。
@@ -151,6 +171,9 @@ from run_critic_probe_halfcheetah import (
 SAVE_DIR = "./npz_logs_step3_halfcheetah"
 STATE_DIR = os.path.join(SAVE_DIR, "state")
 CONDITIONS = ["control", "critic", "buffer", "actor"]
+# 追加の組み合わせ条件。--plan の4条件には含めず、--plan-combined で回す。
+COMBINED_CONDITION = "critic_buffer"
+ALL_CONDITIONS = CONDITIONS + [COMBINED_CONDITION]
 SPECIMENS = [("pure_sac", 8), ("fixed_prior", 8)]
 
 
@@ -299,11 +322,16 @@ def apply_condition(model, algo_type, condition):
     """保存状態のモデルに、条件を1つだけ適用する。"""
     if condition == "control":
         print(" [step3] 条件: control（何も変えずに継続）")
-    elif condition == "critic":
+    elif condition in ("critic", "critic_buffer"):
         n = _reset_module_weights(model.critic)
         model.critic_target.load_state_dict(model.critic.state_dict())
         _clear_optimizer_state_for(model.critic, model)
-        print(f" [step3] 条件: critic（Qネットワーク {n} 層を初期化、目標側も同期）")
+        if condition == "critic_buffer":
+            # バッファ側は読み込まないことで空から開始する（buffer 条件と同じ）。
+            # ここでは重みの初期化だけを行い、バッファの扱いは intervene() 側で分岐する。
+            print(f" [step3] 条件: critic_buffer（Qネットワーク {n} 層を初期化、目標側も同期＋バッファは空から開始）")
+        else:
+            print(f" [step3] 条件: critic（Qネットワーク {n} 層を初期化、目標側も同期）")
     elif condition == "actor":
         n = _reset_module_weights(model.actor)
         _clear_optimizer_state_for(model.actor, model)
@@ -382,7 +410,7 @@ def intervene(algo_type, seed, condition, state_steps=500_000,
     buffer_path = _state_buffer_path(algo_type, seed, state_steps)
     if not os.path.exists(zip_path):
         raise FileNotFoundError(f"状態ファイルがありません: {zip_path}（先に --make-state を実行してください）")
-    if condition != "buffer" and not os.path.exists(buffer_path):
+    if condition not in ("buffer", "critic_buffer") and not os.path.exists(buffer_path):
         raise FileNotFoundError(f"バッファがありません: {buffer_path}（先に --make-state を実行してください）")
 
     train_env = make_vec_env("HalfCheetah-v5", n_envs=1, seed=seed)
@@ -410,7 +438,7 @@ def intervene(algo_type, seed, condition, state_steps=500_000,
         model = _LoadableFixedPrior.load(zip_path, env=train_env)
     else:
         model = model_cls.load(zip_path, env=train_env)
-    if condition != "buffer":
+    if condition not in ("buffer", "critic_buffer"):
         model.load_replay_buffer(buffer_path)
     _print_branch_state(model, algo_type, f"読み込み直後（適用前, {condition}）")
 
@@ -460,6 +488,19 @@ def run_plan(state_steps=500_000, continue_steps=500_000):
                       continue_steps=continue_steps)
 
 
+def run_combined(state_steps=500_000, continue_steps=500_000):
+    """組み合わせリセット（critic_buffer）を両手法1本ずつ回す。
+
+    第1段の 500k 状態は作り直さない。保存済みの状態から分岐する。
+    """
+    for algo_type, seed in SPECIMENS:
+        print(f"\n==========================================")
+        print(f" STEP3-COMBINED: {algo_type} | Seed: {seed} | condition: {COMBINED_CONDITION}")
+        print(f"==========================================")
+        intervene(algo_type, seed, COMBINED_CONDITION, state_steps=state_steps,
+                  continue_steps=continue_steps)
+
+
 def run_smoke():
     print("=== STEP3 SMOKE (pure_sac seed 8: 10k state -> 4 conditions x 2k) ===")
     make_state("pure_sac", 8, state_steps=10_000, probe_every=1000, tag="_smoke")
@@ -473,6 +514,12 @@ def run_smoke():
     make_state("fixed_prior", 8, state_steps=10_000, probe_every=1000, tag="_smoke")
     intervene("fixed_prior", 8, "control", state_steps=10_000,
               continue_steps=2_000, probe_every=1000, tag="_smoke")
+    # 組み合わせ条件の試し回し（両手法。先輩版は load の経路が SAC と違うため、
+    # critic の初期化とバッファ非読み込みの両方が通ることをここで確認する）
+    print("=== STEP3 SMOKE (combined critic_buffer: both algos x 2k) ===")
+    for algo_type in ("pure_sac", "fixed_prior"):
+        intervene(algo_type, 8, COMBINED_CONDITION, state_steps=10_000,
+                  continue_steps=2_000, probe_every=1000, tag="_smoke")
     print("=== SMOKE DONE ===")
 
 
@@ -482,7 +529,7 @@ def main():
     )
     parser.add_argument("--algo", choices=["pure_sac", "fixed_prior"], default="pure_sac")
     parser.add_argument("--seed", type=int, default=8)
-    parser.add_argument("--condition", choices=CONDITIONS, default="control")
+    parser.add_argument("--condition", choices=ALL_CONDITIONS, default="control")
     parser.add_argument("--state-steps", type=int, default=500_000)
     parser.add_argument("--continue-steps", type=int, default=500_000)
     parser.add_argument("--make-state", action="store_true",
@@ -491,6 +538,8 @@ def main():
                         help="第2段: 保存状態から条件を適用して継続する")
     parser.add_argument("--plan", action="store_true",
                         help="第1段2本＋第2段8本を順に回す")
+    parser.add_argument("--plan-combined", action="store_true",
+                        help="組み合わせリセット（critic_buffer）2本を順に回す。第1段の作り直しはしない")
     parser.add_argument("--smoke", action="store_true",
                         help="試し回し: 10k で状態保存 → 4条件 × 2k 継続")
     args = parser.parse_args()
@@ -504,6 +553,9 @@ def main():
     if args.plan:
         run_plan(state_steps=args.state_steps, continue_steps=args.continue_steps)
         return
+    if args.plan_combined:
+        run_combined(state_steps=args.state_steps, continue_steps=args.continue_steps)
+        return
     if args.make_state:
         make_state(args.algo, args.seed, state_steps=args.state_steps)
         return
@@ -511,7 +563,7 @@ def main():
         intervene(args.algo, args.seed, args.condition,
                   state_steps=args.state_steps, continue_steps=args.continue_steps)
         return
-    parser.error("--make-state / --intervene / --plan / --smoke のいずれかを指定してください")
+    parser.error("--make-state / --intervene / --plan / --plan-combined / --smoke のいずれかを指定してください")
 
 
 if __name__ == "__main__":
