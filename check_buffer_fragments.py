@@ -67,12 +67,12 @@ def main():
         top = np.sort(rets)[::-1]
         print("top 10 episode returns: "
               + ", ".join(f"{v:.0f}" for v in top[:10]))
-        for k, frac in [(10, "top10"), (0.01, "top1%"), (0.05, "top5%")]:
-            if isinstance(k, int):
-                sel = top[:k]
+        for value, label in [(10, "top10"), (0.01, "top1%"), (0.05, "top5%")]:
+            if isinstance(value, int):
+                sel = top[:value]
             else:
-                sel = top[:max(1, int(len(top) * frac))]
-            print(f"{frac} mean = {sel.mean():.1f} (n={len(sel)})")
+                sel = top[:max(1, int(len(top) * value))]
+            print(f"{label} mean = {sel.mean():.1f} (n={len(sel)})")
         for th in THRESHOLDS:
             print(f"episodes >= {th}: {(rets >= th).sum()}")
 
