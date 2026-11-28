@@ -114,12 +114,15 @@ def q_values(model, states, actions):
     with torch.no_grad():
         obs_t = torch.as_tensor(states, dtype=torch.float32, device=device)
         act_t = torch.as_tensor(actions, dtype=torch.float32, device=device)
-        if hasattr(critic, "q1_forward") and hasattr(critic, "q2_forward"):
-            q1 = critic.q1_forward(obs_t, act_t)
-            q2 = critic.q2_forward(obs_t, act_t)
-        else:  # フォールバック: q_networks を直接使う
-            q1 = critic.q_networks[0](obs_t, act_t)
-            q2 = critic.q_networks[1](obs_t, act_t)
+        try:
+            # SB3 の ContinuousCritic は forward(obs, action) で Q の組を返す
+            out = critic(obs_t, act_t)
+            q1, q2 = out[0], out[1]
+        except TypeError:
+            # フォールバック: q_networks は連結した入力を受ける Sequential
+            joined = torch.cat([obs_t, act_t], dim=1)
+            q1 = critic.q_networks[0](joined)
+            q2 = critic.q_networks[1](joined)
     return (q1.cpu().numpy().reshape(-1), q2.cpu().numpy().reshape(-1))
 
 
